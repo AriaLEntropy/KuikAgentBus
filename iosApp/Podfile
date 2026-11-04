@@ -1,0 +1,37 @@
+source 'https://cdn.cocoapods.org/'
+
+target 'iosApp' do
+  use_frameworks!
+  platform :ios, '14.1'
+  pod 'OpenKuiklyIOSRender' , '~> 2.24.0'
+  pod 'shared', :path => '../shared'
+  pod 'KuiklyWebviewIOS', :git => 'https://github.com/Kuikly-contrib/KuiklyWebview.git', :tag => '1.0.0'
+
+  pod 'SDWebImage'
+  # Kuikly iOS 不内置 SVG；UIImage / SDWebImage 都解不了。官方示例用 SVGKit 3.x。
+  pod 'SVGKit', :git => 'https://github.com/troZee/SVGKit.git', :branch => '3.x'
+  pod 'NMSSH', '2.3.1'
+end
+
+post_install do |installer|
+  installer.pods_project.targets.each do |target|
+    target.build_configurations.each do |config|
+      deployment = config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'].to_f
+      if deployment < 14.1
+        config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '14.1'
+      end
+      # NMSSH 预编译库（libcrypto/libssl/libssh2）没有 arm64 模拟器切片，
+      # 模拟器统一构建 x86_64（Apple Silicon 上经 Rosetta 运行）。
+      config.build_settings['EXCLUDED_ARCHS[sdk=iphonesimulator*]'] = 'arm64 i386'
+    end
+  end
+
+  # 主工程 iosApp 在模拟器下同样排除 arm64，避免链接/运行时的架构不匹配。
+  user_project = Xcodeproj::Project.open(File.join(__dir__, 'iosApp.xcodeproj'))
+  user_project.targets.each do |target|
+    target.build_configurations.each do |config|
+      config.build_settings['EXCLUDED_ARCHS[sdk=iphonesimulator*]'] = 'arm64 i386'
+    end
+  end
+  user_project.save
+end

@@ -1,0 +1,1148 @@
+package com.example.dsh.module
+
+import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.Manifest
+import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
+import android.net.Uri
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
+import android.graphics.Color
+import android.os.Build
+import android.os.Bundle
+import android.provider.MediaStore
+import android.util.Base64
+import android.util.Log
+import android.view.RoundedCorner
+import android.view.View
+import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
+import android.widget.Toast
+import com.tencent.kuikly.core.render.android.export.KuiklyRenderBaseModule
+import com.tencent.kuikly.core.render.android.export.KuiklyRenderCallback
+import com.example.dsh.BuildConfig
+import com.example.dsh.KRApplication
+import com.example.dsh.ssh.DshSshForegroundService
+import com.example.dsh.ssh.DshSshKeyStore
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+
+class KRBridgeModule : KuiklyRenderBaseModule() {
+    private var navigationBarColorBeforeDim: Int? = null
+    private var navigationBarContrastBeforeDim: Boolean? = null
+    private var sshKeyCallback: KuiklyRenderCallback? = null
+    private var pickImageCallback: KuiklyRenderCallback? = null
+    private var pickFileCallback: KuiklyRenderCallback? = null
+    private var pendingCameraFile: File? = null
+    // ===== 语音识别（按住说话）=====
+    private var voiceEventCallback: KuiklyRenderCallback? = null
+    private var voiceRecognizer: android.speech.SpeechRecognizer? = null
+    private var voicePermissionPending = false
+    /** 每次录音的操作代次：停止/取消会使其失效，异步权限回调据此丢弃过期启动。 */
+    private var voiceOperationGeneration = 0
+    private var voicePermissionGeneration = -1
+    private var voiceSessionActive = false
+    private var voiceLastLevelAt = 0L
+
+    init {
+        activeInstance = this
+    }
+
+    override fun call(method: String, params: String?, callback: KuiklyRenderCallback?): Any? {
+        return when (method) {
+            "ssoRequest" -> {
+                ssoRequest(params, callback)
+            }
+
+            "showAlert" -> {
+                showAlert(params, callback)
+            }
+
+            "closePage" -> {
+                closePage(params)
+            }
+
+            "openPage" -> {
+                openPage(params)
+            }
+
+            "copyToPasteboard" -> {
+                copyToPasteboard(params)
+            }
+
+            "toast" -> {
+                toast(params)
+            }
+
+            "log" -> {
+                log(params)
+            }
+
+            "reportDT" -> {
+                reportDT(params)
+            }
+
+            "reportRealtime" -> {
+                reportRealtime(params)
+            }
+
+            "qqLiveSSORequest" -> {
+                qqLiveSSORequest(params, callback)
+            }
+
+            "localServeTime" -> {
+                localServeTime(params, callback)
+            }
+
+            "currentTimestamp" -> {
+                currentTimestamp(params)
+            }
+
+            "timezoneOffset" -> {
+                timezoneOffset()
+            }
+
+            "getScreenCornerRadius" -> {
+                screenCornerRadius()
+            }
+
+            "dateFormatter" -> {
+                dateFormatter(params)
+            }
+
+            "closeKeyboard" -> {
+                closeKeyboard()
+            }
+
+            "disableInputSuggestions" -> {
+                disableInputSuggestions()
+            }
+
+            "setSystemBarsDimmed" -> {
+                setSystemBarsDimmed(params)
+            }
+
+            "setNavigationBarColor" -> setNavigationBarColor(params)
+
+            "pickImage" -> pickImage(params, callback)
+            "pickFile" -> pickFile(callback)
+            "saveImage" -> saveImage(params, callback)
+            "startVoiceRecognition" -> startVoiceRecognition(callback)
+            "stopVoiceRecognition" -> stopVoiceRecognition()
+            "cancelVoiceRecognition" -> cancelVoiceRecognition()
+            "pickSshKey" -> pickSshKey(callback)
+            "importSshKey" -> importSshKey(params, callback)
+            "validateSshKey" -> validateSshKey(params, callback)
+            "deleteSshKey" -> deleteSshKey(params)
+            "startSshKeepAlive" -> startSshKeepAlive()
+            "stopSshKeepAlive" -> stopSshKeepAlive()
+            "shareExportFile" -> shareExportFile(params, callback)
+            "htmlToPdf" -> htmlToPdf(params, callback)
+            "readLastCrash" -> readLastCrash(params)
+            "clearLastCrash" -> clearLastCrash(callback)
+            "getDeviceInfo" -> getDeviceInfo(params)
+
+            else -> callback?.invoke(
+                mapOf(
+                    "code" to -1,
+                    "message" to "方法不存在"
+                )
+            )
+        }
+    }
+
+    private fun reportRealtime(params: String?) {
+    }
+
+    private fun reportDT(params: String?) {
+    }
+
+    private fun log(params: String?) {
+        if (params == null) {
+            return
+        }
+
+        val paramJSON = JSONObject(params)
+        Log.i("KuiklyRender", paramJSON.optString("content"))
+    }
+
+    private fun toast(params: String?) {
+        if (params == null) {
+            return
+        }
+        val paramJSON = JSONObject(params)
+        Toast.makeText(
+            KRApplication.application,
+            paramJSON.optString("content"),
+            Toast.LENGTH_SHORT
+        ).show()
+    }
+
+    private fun shareExportFile(params: String?, callback: KuiklyRenderCallback?) {
+        val paramJSON = JSONObject(params ?: "{}")
+        val path = paramJSON.optString("path")
+        if (path.isEmpty()) { callback?.invoke(mapOf("ok" to false, "message" to "缺少文件路径")); return }
+        val ctx = context ?: KRApplication.application
+        val file = File(path)
+        if (!file.isFile) { callback?.invoke(mapOf("ok" to false, "message" to "导出文件不存在")); return }
+        try {
+            val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", file)
+            val mime = paramJSON.optString("mime").ifEmpty { mimeForFile(file) }
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = mime
+                putExtra(Intent.EXTRA_STREAM, uri)
+                putExtra(Intent.EXTRA_SUBJECT, file.name)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            val chooser = Intent.createChooser(intent, "分享导出文件")
+            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            ctx.startActivity(chooser)
+            // ACTION_SEND only confirms that the chooser opened, not that the recipient saved the file.
+            callback?.invoke(mapOf("ok" to true, "message" to "分享面板已打开"))
+        } catch (e: Exception) {
+            // FileProvider 路径未配置（如导出目录变更）时兜底，避免崩溃
+            Log.e("KRBridgeModule", "shareExportFile failed", e)
+            Toast.makeText(ctx, "导出失败：${e.message}", Toast.LENGTH_SHORT).show()
+            callback?.invoke(mapOf("ok" to false, "message" to "无法打开分享面板"))
+        }
+    }
+
+    private fun mimeForFile(file: File): String = when (file.extension.lowercase()) {
+        "pdf" -> "application/pdf"
+        "html", "htm" -> "text/html"
+        "md" -> "text/markdown"
+        "txt" -> "text/plain"
+        else -> "application/octet-stream"
+    }
+
+    /**
+     * 走 Android 系统打印框架把 HTML 渲染为 PDF。
+     *
+     * `PrintDocumentAdapter.LayoutResultCallback`/`WriteResultCallback` 的构造函数是包私有的，
+     * 无法在 Kotlin 中静默驱动适配器，因此使用 WebView 自带的打印适配器配合 `PrintManager`：
+     * 用户在系统面板选择「另存为 PDF」完成导出（官方支持的 HTML→PDF 路径，自动分页）。
+     */
+    private fun htmlToPdf(params: String?, callback: KuiklyRenderCallback?) {
+        val paramJSON = JSONObject(params ?: "{}")
+        val html = paramJSON.optString("html")
+        if (html.isEmpty()) {
+            callback?.invoke(mapOf("ok" to false, "message" to "缺少 HTML 内容"))
+            return
+        }
+        val ctx = context ?: KRApplication.application
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        handler.post {
+            val finished = java.util.concurrent.atomic.AtomicBoolean(false)
+            fun finish(ok: Boolean, message: String) {
+                if (!finished.compareAndSet(false, true)) return
+                callback?.invoke(mapOf("ok" to ok, "path" to "", "message" to message))
+            }
+            try {
+                val view = android.webkit.WebView(ctx)
+                view.settings.javaScriptEnabled = false
+                view.webViewClient = object : android.webkit.WebViewClient() {
+                    override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
+                        try {
+                            val adapter = view?.createPrintDocumentAdapter("dsh-session")
+                            if (adapter == null) {
+                                finish(false, "无法创建打印适配器")
+                                return
+                            }
+                            val printManager = ctx.getSystemService(Context.PRINT_SERVICE) as android.print.PrintManager
+                            val attributes = android.print.PrintAttributes.Builder()
+                                .setMediaSize(android.print.PrintAttributes.MediaSize.ISO_A4)
+                                .build()
+                            printManager.print("DSH 对话", adapter, attributes)
+                            finish(true, "已打开系统打印，可选择「另存为 PDF」")
+                        } catch (e: Exception) {
+                            Log.e("KRBridgeModule", "htmlToPdf print failed", e)
+                            finish(false, "生成 PDF 失败：${e.message}")
+                        }
+                    }
+
+                    override fun onReceivedError(
+                        view: android.webkit.WebView?,
+                        request: android.webkit.WebResourceRequest?,
+                        error: android.webkit.WebResourceError?,
+                    ) {
+                        finish(false, "HTML 加载失败")
+                    }
+                }
+                view.loadDataWithBaseURL(null, html, "text/html", "utf-8", null)
+                handler.postDelayed({ finish(false, "生成 PDF 超时，请重试") }, 20_000)
+            } catch (e: Exception) {
+                Log.e("KRBridgeModule", "htmlToPdf failed", e)
+                finish(false, "生成 PDF 失败：${e.message}")
+            }
+        }
+    }
+
+    private fun readLastCrash(params: String?): String {
+        val file = File(KRApplication.application.filesDir, "last_crash.txt")
+        return if (file.exists()) file.readText() else ""
+    }
+
+    private fun clearLastCrash(callback: KuiklyRenderCallback?) {
+        val ok = runCatching {
+            val file = File(KRApplication.application.filesDir, "last_crash.txt")
+            !file.exists() || file.delete()
+        }.getOrDefault(false)
+        callback?.invoke(mapOf("ok" to ok))
+    }
+
+    private fun getDeviceInfo(params: String?): String {
+        return JSONObject().apply {
+            put("version", BuildConfig.VERSION_NAME)
+            put("model", "${Build.MANUFACTURER} ${Build.MODEL}".trim())
+            put("os", "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
+        }.toString()
+    }
+
+    private fun copyToPasteboard(params: String?) {
+        if (params == null) {
+            return
+        }
+
+        val paramJSON = JSONObject(params)
+        (context?.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager)?.also {
+            it.setPrimaryClip(ClipData.newPlainText(MODULE_NAME, paramJSON.optString("content")))
+        }
+    }
+
+    private fun openPage(params: String?) {
+        if (params == null) {
+            return
+        }
+        val ctx = context ?: return
+        val paramJSON = JSONObject(params)
+        val url = paramJSON.optString("url")
+    }
+
+    private fun closePage(params: String?) {
+        activity?.finish()
+    }
+
+    private fun showAlert(params: String?, callback: KuiklyRenderCallback?) {
+        if (params == null) {
+            return
+        }
+        val paramJSON = JSONObject(params)
+        val titleText = paramJSON.optString("title")
+        val message = paramJSON.optString("message")
+        val buttons = paramJSON.optJSONArray("buttons") ?: JSONArray()
+    }
+
+    private fun ssoRequest(params: String?, callback: KuiklyRenderCallback?) {}
+
+    private fun qqLiveSSORequest(params: String?, callback: KuiklyRenderCallback?) {
+    }
+
+    private fun localServeTime(params: String?, callback: KuiklyRenderCallback?) {
+        val time = (System.currentTimeMillis() / 1000.0)
+        callback?.invoke(
+            mapOf(
+                "time" to time
+            )
+        )
+    }
+
+    private fun currentTimestamp(params: String?): String {
+        return (System.currentTimeMillis()).toString()
+    }
+
+    /** 设备本地时区偏移（毫秒，UTC→本地为正），供 JS 侧时间格式化（QuickJS 无时区数据）。 */
+    private fun timezoneOffset(): String {
+        return java.util.TimeZone.getDefault().getOffset(System.currentTimeMillis()).toString()
+    }
+
+    /**
+     * 设备屏幕圆角半径（dp），用于底部面板顶部圆角动态适配不同安卓机型。
+     * Android 12+ 优先读 WindowInsets 的圆角，其次读系统资源 `rounded_corner_radius`；均无则返回 0。
+     */
+    private fun screenCornerRadius(): String {
+        val ctx = context ?: KRApplication.application
+        val density = ctx.resources.displayMetrics.density
+        var radiusPx = 0f
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            runCatching {
+                val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+                val corner = wm?.currentWindowMetrics?.windowInsets?.getRoundedCorner(RoundedCorner.POSITION_TOP_LEFT)
+                if (corner != null && corner.radius > 0) radiusPx = corner.radius.toFloat()
+            }
+        }
+        if (radiusPx <= 0f) {
+            runCatching {
+                val id = ctx.resources.getIdentifier("rounded_corner_radius", "dimen", "android")
+                if (id > 0) {
+                    val r = ctx.resources.getDimensionPixelSize(id)
+                    if (r > 0) radiusPx = r.toFloat()
+                }
+            }
+        }
+        val radiusDp = if (density > 0f) radiusPx / density else 0f
+        return radiusDp.toString()
+    }
+
+    private fun dateFormatter(params: String?): String {
+        val paramJSONObject = JSONObject(params ?: "{}")
+        val data = Date(paramJSONObject.optLong("timeStamp"))
+        val format = SimpleDateFormat(paramJSONObject.optString("format"))
+        return format.format(data)
+    }
+
+    private fun closeKeyboard(): String {
+        activity?.runOnUiThread {
+            val focusedView = activity?.currentFocus
+            focusedView?.clearFocus()
+            val inputMethodManager = context?.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+            inputMethodManager?.hideSoftInputFromWindow(focusedView?.windowToken, 0)
+        }
+        return "true"
+    }
+
+    /**
+     * 关闭本窗口内所有 EditText 的 IME 联想/拼写检查，去掉系统红色波浪下划线，
+     * 对齐 web 输入框（无拼写检查）。遍历 decorView 设置 TYPE_TEXT_FLAG_NO_SUGGESTIONS。
+     */
+    private fun disableInputSuggestions(): String {
+        activity?.runOnUiThread {
+            activity?.window?.decorView?.let { applyNoSuggestions(it) }
+        }
+        return "true"
+    }
+
+    private fun applyNoSuggestions(view: android.view.View) {
+        if (view is android.widget.EditText) {
+            view.inputType = view.inputType or android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        }
+        if (view is android.view.ViewGroup) {
+            for (index in 0 until view.childCount) applyNoSuggestions(view.getChildAt(index))
+        }
+    }
+
+    private fun setNavigationBarColor(params: String?) {
+        val json = JSONObject(params ?: "{}")
+        val isDark = json.optBoolean("isDark")
+        activity?.runOnUiThread {
+            val window = activity?.window ?: return@runOnUiThread
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                window.isNavigationBarContrastEnforced = false
+            }
+            // 整屏沉浸之后这条导航栏必须是透明的：一旦涂成不透明色，系统就把这 24dp
+            // 画在内容上面，页面最后一项又被切掉。所以颜色参数不再使用，这里只按 isDark
+            // 翻图标的明暗（浅色底用深色图标、深色底用浅色图标）
+            window.navigationBarColor = Color.TRANSPARENT
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val flags = window.decorView.systemUiVisibility
+                window.decorView.systemUiVisibility = if (isDark) {
+                    flags and View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR.inv()
+                } else {
+                    flags or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+                }
+            }
+        }
+    }
+
+    private fun setSystemBarsDimmed(params: String?) {
+        val json = JSONObject(params ?: "{}")
+        val dimmed = json.optBoolean("dimmed")
+        val dimColor = if (json.has("color")) {
+            json.optLong("color").toInt()
+        } else {
+            Color.rgb(153, 153, 153)
+        }
+        activity?.runOnUiThread {
+            val window = activity?.window ?: return@runOnUiThread
+            // 同 setNavigationBarColor：导航栏保持透明，浮层自己铺到物理底边即可，
+            // 这里只借它原有的开合时机翻图标明暗，不再涂底色
+            window.navigationBarColor = Color.TRANSPARENT
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val lightBar = Color.red(dimColor) * 0.299f +
+                    Color.green(dimColor) * 0.587f +
+                    Color.blue(dimColor) * 0.114f >= 128f
+                val flags = window.decorView.systemUiVisibility
+                window.decorView.systemUiVisibility = if (dimmed && lightBar) {
+                    flags or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+                } else if (dimmed) {
+                    flags and View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR.inv()
+                } else {
+                    restoreNavigationBar()
+                    return@runOnUiThread
+                }
+            } else if (!dimmed) {
+                restoreNavigationBar()
+            }
+        }
+    }
+
+    private fun pickImage(params: String?, callback: KuiklyRenderCallback?) {
+        val source = JSONObject(params ?: "{}").optString("source", "album")
+        pickImageCallback = callback
+        val intent: Intent
+        val requestCode: Int
+        when (source) {
+            "camera" -> {
+                val packageManager = activity?.packageManager
+                val captureIntent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
+                if (packageManager != null && captureIntent.resolveActivity(packageManager) == null) {
+                    finishPickImage(mapOf("ok" to false, "error" to "未找到可用的相机应用"))
+                    return
+                }
+                val cacheDir = context?.cacheDir ?: run {
+                    finishPickImage(mapOf("ok" to false, "error" to "无法访问缓存目录"))
+                    return
+                }
+                val photoDir = File(cacheDir, "camera").apply { mkdirs() }
+                val photoFile = File(photoDir, "dsh_capture_${System.currentTimeMillis()}.jpg")
+                val uri = try {
+                    FileProvider.getUriForFile(
+                        requireNotNull(context),
+                        requireNotNull(context).packageName + ".fileprovider",
+                        photoFile,
+                    )
+                } catch (e: Exception) {
+                    finishPickImage(mapOf("ok" to false, "error" to "相机文件创建失败"))
+                    return
+                }
+                pendingCameraFile = photoFile
+                captureIntent.putExtra(MediaStore.EXTRA_OUTPUT, uri)
+                captureIntent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                intent = captureIntent
+                requestCode = REQUEST_CAPTURE_PHOTO
+            }
+
+            else -> {
+                intent = Intent(Intent.ACTION_GET_CONTENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "image/*"
+                    putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                }
+                requestCode = REQUEST_PICK_IMAGE
+            }
+        }
+        try {
+            activity?.startActivityForResult(intent, requestCode)
+        } catch (e: Exception) {
+            finishPickImage(mapOf("ok" to false, "error" to "无法打开${if (source == "camera") "相机" else "相册"}"))
+        }
+    }
+
+    private fun finishPickImage(result: Map<String, Any?>) {
+        Log.i("HRBridgePick", "finishPickImage ok=${result["ok"]} cancelled=${result["cancelled"]} err=${result["error"]} bytes=${result["bytes"]} mime=${result["mediaType"]} cb=${pickImageCallback != null}")
+        try {
+            pickImageCallback?.invoke(result)
+        } catch (t: Throwable) {
+        }
+        pickImageCallback = null
+        pendingCameraFile = null
+    }
+
+    private sealed class PickedBytesResult {
+        class Ok(val bytes: ByteArray) : PickedBytesResult()
+        object TooLarge : PickedBytesResult()
+        object Failed : PickedBytesResult()
+    }
+
+    /**
+     * 有上限的分块读取：一旦超过 [limit] 立即停止，避免把大文件整体读入内存导致 OOM
+     * （`InputStream.readBytes()` 会先全部读入再判断大小）。
+     */
+    private fun readPickedBytes(uri: Uri?, limit: Int): PickedBytesResult {
+        if (uri == null) return PickedBytesResult.Failed
+        return try {
+            context?.contentResolver?.openInputStream(uri)?.use { input ->
+                val buffer = ByteArray(64 * 1024)
+                val out = java.io.ByteArrayOutputStream()
+                var total = 0
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    total += read
+                    if (total > limit) return PickedBytesResult.TooLarge
+                    out.write(buffer, 0, read)
+                }
+                PickedBytesResult.Ok(out.toByteArray())
+            } ?: PickedBytesResult.Failed
+        } catch (e: Exception) {
+            PickedBytesResult.Failed
+        }
+    }
+
+    private fun decodeImageMeta(bytes: ByteArray): Triple<String?, Int, Int> {
+        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+        return Triple(options.outMimeType, options.outWidth, options.outHeight)
+    }
+
+    private fun deliverPickedImages(images: List<Pair<ByteArray?, String>>) {
+        val entries = mutableListOf<Map<String, Any?>>()
+        for ((bytes, displayName) in images) {
+            if (bytes == null || bytes.isEmpty()) continue
+            val (mime, width, height) = decodeImageMeta(bytes)
+            if (mime.isNullOrEmpty() || width <= 0 || height <= 0) continue
+            val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+            entries.add(
+                mapOf(
+                    "dataUrl" to "data:$mime;base64,$base64",
+                    "mediaType" to mime,
+                    "name" to displayName,
+                    "bytes" to bytes.size.toString(),
+                    "width" to width.toString(),
+                    "height" to height.toString(),
+                )
+            )
+        }
+        if (entries.isEmpty()) {
+            finishPickImage(mapOf("ok" to false, "error" to "无法读取图片数据"))
+            return
+        }
+        Log.i("HRBridgePick", "picked ${entries.size} image(s)")
+        finishPickImage(mapOf("ok" to true, "images" to entries))
+    }
+
+    private fun deliverPickedImage(bytes: ByteArray?, displayName: String) =
+        deliverPickedImages(listOf(bytes to displayName))
+
+    // ===== 通用文件选择（文档选择器）=====
+    private fun pickFile(callback: KuiklyRenderCallback?) {
+        pickFileCallback = callback
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+        }
+        try {
+            activity?.startActivityForResult(intent, REQUEST_PICK_FILE)
+        } catch (e: Exception) {
+            finishPickFile(mapOf("ok" to false, "error" to "无法打开文件选择器"))
+        }
+    }
+
+    private fun finishPickFile(result: Map<String, Any?>) {
+        try {
+            pickFileCallback?.invoke(result)
+        } catch (t: Throwable) {
+        }
+        pickFileCallback = null
+    }
+
+    private fun deliverPickedFiles(uris: List<Uri>) {
+        val entries = mutableListOf<Map<String, Any?>>()
+        val resolver = context?.contentResolver
+        for (uri in uris) {
+            when (val result = readPickedBytes(uri, MAX_PICK_FILE_BYTES)) {
+                is PickedBytesResult.TooLarge -> {
+                    finishPickFile(mapOf("ok" to false, "error" to "文件超过 50MB 上限"))
+                    return
+                }
+                is PickedBytesResult.Failed -> continue
+                is PickedBytesResult.Ok -> {
+                    val bytes = result.bytes
+                    if (bytes.isEmpty()) continue
+                    val mime = resolver?.getType(uri)?.takeIf { it.isNotEmpty() } ?: "application/octet-stream"
+                    val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                    entries.add(
+                        mapOf(
+                            "dataUrl" to "data:$mime;base64,$base64",
+                            "mediaType" to mime,
+                            "name" to queryDisplayName(uri, "attachment"),
+                            "bytes" to bytes.size.toString(),
+                        )
+                    )
+                }
+            }
+        }
+        if (entries.isEmpty()) {
+            finishPickFile(mapOf("ok" to false, "error" to "无法读取文件数据"))
+            return
+        }
+        finishPickFile(mapOf("ok" to true, "files" to entries))
+    }
+
+    private fun queryDisplayName(uri: Uri, fallback: String = "image"): String {
+        var name = fallback
+        try {
+            context?.contentResolver?.query(
+                uri,
+                arrayOf(MediaStore.Images.Media.DISPLAY_NAME),
+                null, null, null,
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val idx = cursor.getColumnIndex(MediaStore.Images.Media.DISPLAY_NAME)
+                    if (idx >= 0) cursor.getString(idx)?.takeIf { it.isNotEmpty() }?.let { name = it }
+                }
+            }
+        } catch (e: Exception) {
+            // 保留默认名
+        }
+        return name
+    }
+
+    private fun saveImage(params: String?, callback: KuiklyRenderCallback?) {
+        try {
+            val dataUrl = JSONObject(params ?: "{}").optString("dataUrl", "")
+            if (dataUrl.isEmpty()) {
+                callback?.invoke(mapOf("ok" to false, "error" to "空图片数据"))
+                return
+            }
+            // 解析 dataUrl: data:<mime>;base64,<base64>
+            val commaIdx = dataUrl.indexOf(',')
+            if (commaIdx < 0 || !dataUrl.startsWith("data:")) {
+                callback?.invoke(mapOf("ok" to false, "error" to "无效的 dataUrl 格式"))
+                return
+            }
+            val header = dataUrl.substring(5, commaIdx)
+            val mime = header.substringBefore(';').ifEmpty { "image/png" }
+            val base64 = dataUrl.substring(commaIdx + 1)
+            val bytes = Base64.decode(base64, Base64.DEFAULT)
+            if (bytes == null || bytes.isEmpty()) {
+                callback?.invoke(mapOf("ok" to false, "error" to "图片解码失败"))
+                return
+            }
+            // 保存到系统相册
+            val resolver = context?.contentResolver
+            if (resolver == null) {
+                callback?.invoke(mapOf("ok" to false, "error" to "Context 不可用"))
+                return
+            }
+            val displayName = "DSH_${System.currentTimeMillis()}"
+            val values = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, displayName)
+                put(android.provider.MediaStore.Images.Media.MIME_TYPE, mime)
+                put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/DSH")
+            }
+            val uri = resolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+            if (uri == null) {
+                callback?.invoke(mapOf("ok" to false, "error" to "创建相册条目失败"))
+                return
+            }
+            resolver.openOutputStream(uri)?.use { it.write(bytes) }
+            callback?.invoke(mapOf("ok" to true))
+        } catch (e: Exception) {
+            val errMsg = e.message ?: "未知错误"
+            callback?.invoke(mapOf("ok" to false, "error" to errMsg))
+        }
+    }
+
+    // ===== 语音识别（Android SpeechRecognizer：系统语音转文字 + onRmsChanged 音量）=====
+
+    private fun startVoiceRecognition(callback: KuiklyRenderCallback?) {
+        voiceEventCallback = callback
+        val act = activity
+        if (act == null) {
+            emitVoiceEvent("error", message = "当前页面不可用", code = "start_failed")
+            return
+        }
+        val generation = ++voiceOperationGeneration
+        if (ContextCompat.checkSelfPermission(act, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            voicePermissionPending = true
+            voicePermissionGeneration = generation
+            ActivityCompat.requestPermissions(act, arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_RECORD_AUDIO)
+            return
+        }
+        act.runOnUiThread { beginRecognizer(act) }
+    }
+
+    private fun beginRecognizer(act: Activity) {
+        if (!android.speech.SpeechRecognizer.isRecognitionAvailable(act)) {
+            emitVoiceEvent("error", message = "当前设备不支持语音识别", code = "unsupported")
+            return
+        }
+        val recognizer = voiceRecognizer
+            ?: android.speech.SpeechRecognizer.createSpeechRecognizer(act).also { voiceRecognizer = it }
+        recognizer.setRecognitionListener(voiceRecognitionListener)
+        val intent = Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, java.util.Locale.getDefault().toLanguageTag())
+            putExtra(android.speech.RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(android.speech.RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            // 拉长静音判定，避免用户还在思考/换气就被提前截断
+            putExtra(android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 60_000L)
+            putExtra(android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 60_000L)
+        }
+        voiceSessionActive = true
+        try {
+            recognizer.startListening(intent)
+        } catch (e: Exception) {
+            voiceSessionActive = false
+            Log.e("KRBridgeModule", "startVoiceRecognition failed", e)
+            emitVoiceEvent("error", message = "语音识别启动失败", code = "start_failed")
+        }
+    }
+
+    private fun stopVoiceRecognition() {
+        voicePermissionPending = false
+        voiceOperationGeneration += 1
+        val work: () -> Unit = {
+            if (voiceSessionActive) {
+                try {
+                    voiceRecognizer?.stopListening()
+                } catch (e: Exception) {
+                    Log.e("KRBridgeModule", "stopVoiceRecognition failed", e)
+                    emitVoiceEvent("end")
+                }
+            } else {
+                emitVoiceEvent("end")
+            }
+        }
+        val act = activity
+        if (act != null) act.runOnUiThread(work) else work()
+    }
+
+    private fun cancelVoiceRecognition() {
+        voicePermissionPending = false
+        voiceOperationGeneration += 1
+        val work: () -> Unit = {
+            voiceSessionActive = false
+            try {
+                voiceRecognizer?.cancel()
+            } catch (e: Exception) {
+                Log.e("KRBridgeModule", "cancelVoiceRecognition failed", e)
+            }
+        }
+        val act = activity
+        if (act != null) act.runOnUiThread(work) else work()
+        voiceEventCallback = null
+    }
+
+    fun onRequestPermissionsResult(requestCode: Int, grantResults: IntArray) {
+        if (requestCode == REQUEST_SSH_KEY_PERMISSION) {
+            val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
+            if (!granted) {
+                Toast.makeText(
+                    KRApplication.application,
+                    "未授予存储读取权限：若文件选择器中看不到文件，请在系统设置中允许“文件/存储”访问后重试",
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+            launchSshKeyPicker()
+            return
+        }
+        if (requestCode != REQUEST_RECORD_AUDIO || !voicePermissionPending) return
+        val generation = voicePermissionGeneration
+        voicePermissionPending = false
+        // 录音已在等待权限期间被停止/取消：丢弃这次迟到的授权，避免重新拉起麦克风。
+        if (generation != voiceOperationGeneration) return
+        val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
+        val act = activity
+        if (granted && act != null) {
+            act.runOnUiThread { beginRecognizer(act) }
+        } else {
+            emitVoiceEvent("error", message = "需要麦克风权限才能使用语音输入", code = "permission_denied")
+        }
+    }
+
+    private fun emitVoiceEvent(event: String, text: String = "", message: String = "", code: String = "") {
+        val callback = voiceEventCallback ?: return
+        val payload = HashMap<String, Any?>()
+        payload["event"] = event
+        if (text.isNotEmpty() || event == "partial" || event == "final") payload["text"] = text
+        if (message.isNotEmpty()) payload["message"] = message
+        if (code.isNotEmpty()) payload["code"] = code
+        try {
+            callback.invoke(payload)
+        } catch (t: Throwable) {
+            Log.e("KRBridgeModule", "emitVoiceEvent failed", t)
+        }
+    }
+
+    private fun emitVoiceLevel(level: Float) {
+        val now = System.currentTimeMillis()
+        if (now - voiceLastLevelAt < 80L) return
+        voiceLastLevelAt = now
+        val callback = voiceEventCallback ?: return
+        try {
+            callback.invoke(mapOf("event" to "level", "level" to level))
+        } catch (t: Throwable) {
+            // 回调已释放时忽略
+        }
+    }
+
+    private val voiceRecognitionListener = object : android.speech.RecognitionListener {
+        override fun onReadyForSpeech(params: Bundle?) {
+            emitVoiceEvent("ready")
+        }
+
+        override fun onBeginningOfSpeech() {}
+
+        override fun onRmsChanged(rmsdB: Float) {
+            // rmsdB 典型范围约 -2..8（0 为最大值）；截断后归一到 0..1，避免正常说话只到半高
+            emitVoiceLevel(((rmsdB.coerceIn(-2f, 8f) + 2f) / 10f).coerceIn(0f, 1f))
+        }
+
+        override fun onBufferReceived(buffer: ByteArray?) {}
+
+        override fun onEndOfSpeech() {}
+
+        override fun onError(error: Int) {
+            voiceSessionActive = false
+            val info = voiceErrorInfo(error)
+            if (info == null) {
+                emitVoiceEvent("end")
+            } else {
+                emitVoiceEvent("error", message = info.second, code = info.first)
+            }
+        }
+
+        override fun onResults(results: Bundle?) {
+            voiceSessionActive = false
+            val text = results
+                ?.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
+                ?.firstOrNull()
+                .orEmpty()
+            if (text.isNotEmpty()) emitVoiceEvent("final", text = text)
+            emitVoiceEvent("end")
+        }
+
+        override fun onPartialResults(partialResults: Bundle?) {
+            val text = partialResults
+                ?.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
+                ?.firstOrNull()
+                .orEmpty()
+            if (text.isNotEmpty()) emitVoiceEvent("partial", text = text)
+        }
+
+        override fun onEvent(eventType: Int, params: Bundle?) {}
+    }
+
+    /** 返回 (错误码, 兜底中文文案)；no-match / timeout / client 等软失败返回 null，按“无内容”结束。 */
+    private fun voiceErrorInfo(error: Int): Pair<String, String>? = when (error) {
+        android.speech.SpeechRecognizer.ERROR_AUDIO -> "failed" to "录音错误"
+        android.speech.SpeechRecognizer.ERROR_CLIENT -> null
+        android.speech.SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "permission_denied" to "缺少麦克风权限"
+        android.speech.SpeechRecognizer.ERROR_NETWORK -> "network" to "网络错误，语音识别需要联网"
+        android.speech.SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "network" to "网络超时"
+        android.speech.SpeechRecognizer.ERROR_NO_MATCH -> null
+        android.speech.SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "busy" to "语音识别服务繁忙，请稍后重试"
+        android.speech.SpeechRecognizer.ERROR_SERVER -> "failed" to "语音识别服务错误"
+        android.speech.SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> null
+        else -> "failed" to "语音识别失败（$error）"
+    }
+
+    private fun pickSshKey(callback: KuiklyRenderCallback?) {
+        sshKeyCallback = callback
+        val act = activity ?: run {
+            callback?.invoke(mapOf("uri" to ""))
+            return
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU &&
+            act.checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED
+        ) {
+            act.requestPermissions(
+                arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE),
+                REQUEST_SSH_KEY_PERMISSION,
+            )
+            return
+        }
+        launchSshKeyPicker()
+    }
+
+    private fun launchSshKeyPicker() {
+        val act = activity
+        if (act == null) {
+            sshKeyCallback?.invoke(mapOf("uri" to ""))
+            sshKeyCallback = null
+            return
+        }
+        val picker = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+        }
+        try {
+            act.startActivityForResult(picker, REQUEST_SSH_KEY)
+        } catch (e: ActivityNotFoundException) {
+            Log.w("KuiklyRender", "ACTION_OPEN_DOCUMENT has no handler, falling back to ACTION_GET_CONTENT", e)
+            val fallback = Intent(Intent.ACTION_GET_CONTENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "*/*"
+            }
+            try {
+                act.startActivityForResult(fallback, REQUEST_SSH_KEY)
+            } catch (e2: ActivityNotFoundException) {
+                Log.w("KuiklyRender", "no system file picker available", e2)
+                Toast.makeText(KRApplication.application, "无法打开文件选择器，请检查系统文件管理应用", Toast.LENGTH_SHORT).show()
+                sshKeyCallback?.invoke(mapOf("uri" to ""))
+                sshKeyCallback = null
+            }
+        }
+    }
+
+    private fun importSshKey(params: String?, callback: KuiklyRenderCallback?) {
+        val uri = Uri.parse(JSONObject(params ?: "{}").optString("uri"))
+        val bytes = runCatching {
+            context?.contentResolver?.openInputStream(uri)?.use { it.readBytes() }
+        }.getOrNull()
+        if (bytes == null) {
+            callback?.invoke(mapOf("ok" to false, "message" to "无法读取 SSH 私钥"))
+            return
+        }
+        val keyId = runCatching { DshSshKeyStore(requireNotNull(context)).importBytes("ssh-key", bytes) }.getOrNull()
+        bytes.fill(0)
+        if (keyId == null) {
+            callback?.invoke(mapOf("ok" to false, "message" to "无法导入 SSH 私钥"))
+            return
+        }
+        callback?.invoke(mapOf("ok" to true, "keyId" to keyId))
+    }
+
+    private fun deleteSshKey(params: String?) {
+        DshSshKeyStore(requireNotNull(context)).delete(JSONObject(params ?: "{}").optString("keyId"))
+    }
+
+    private fun validateSshKey(params: String?, callback: KuiklyRenderCallback?) {
+        val keyId = JSONObject(params ?: "{}").optString("keyId")
+        val valid = runCatching { DshSshKeyStore(requireNotNull(context)).validateKey(keyId) }.getOrDefault(false)
+        callback?.invoke(mapOf("valid" to valid))
+    }
+
+    private fun startSshKeepAlive() {
+        val intent = Intent(context, DshSshForegroundService::class.java)
+        if (Build.VERSION.SDK_INT >= 26) context?.startForegroundService(intent) else context?.startService(intent)
+    }
+
+    private fun stopSshKeepAlive() {
+        context?.stopService(Intent(context, DshSshForegroundService::class.java))
+    }
+
+    private fun restoreNavigationBar() {
+        val window = activity?.window ?: return
+        navigationBarColorBeforeDim?.let { window.navigationBarColor = it }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            navigationBarContrastBeforeDim?.let { window.isNavigationBarContrastEnforced = it }
+        }
+        navigationBarColorBeforeDim = null
+        navigationBarContrastBeforeDim = null
+    }
+
+    override fun onDestroy() {
+        if (activeInstance === this) activeInstance = null
+        voiceEventCallback = null
+        voiceSessionActive = false
+        try {
+            voiceRecognizer?.destroy()
+        } catch (e: Exception) {
+            Log.e("KRBridgeModule", "destroy recognizer failed", e)
+        }
+        voiceRecognizer = null
+        restoreNavigationBar()
+        super.onDestroy()
+    }
+
+    fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        Log.i("HRBridgePick", "onActivityResult rc=$requestCode result=$resultCode data=${data?.data}")
+        when (requestCode) {
+            REQUEST_SSH_KEY -> {
+                val uri = if (resultCode == android.app.Activity.RESULT_OK) data?.data?.toString().orEmpty() else ""
+                sshKeyCallback?.invoke(mapOf("uri" to uri))
+                sshKeyCallback = null
+            }
+
+            REQUEST_PICK_IMAGE -> {
+                if (resultCode != android.app.Activity.RESULT_OK) {
+                    finishPickImage(mapOf("ok" to false, "cancelled" to true))
+                    return
+                }
+                val uris = mutableListOf<Uri>()
+                val clip = data?.clipData
+                if (clip != null) {
+                    for (i in 0 until clip.itemCount) clip.getItemAt(i)?.uri?.let(uris::add)
+                }
+                data?.data?.let { if (it !in uris) uris.add(it) }
+                if (uris.isEmpty()) {
+                    finishPickImage(mapOf("ok" to false, "cancelled" to true))
+                    return
+                }
+                deliverPickedImages(uris.map { uri ->
+                    val bytes = (readPickedBytes(uri, MAX_PICK_FILE_BYTES) as? PickedBytesResult.Ok)?.bytes
+                    bytes to queryDisplayName(uri)
+                })
+            }
+
+            REQUEST_PICK_FILE -> {
+                if (resultCode != android.app.Activity.RESULT_OK) {
+                    finishPickFile(mapOf("ok" to false, "cancelled" to true))
+                    return
+                }
+                val uris = mutableListOf<Uri>()
+                val clip = data?.clipData
+                if (clip != null) {
+                    for (i in 0 until clip.itemCount) clip.getItemAt(i)?.uri?.let(uris::add)
+                }
+                data?.data?.let { if (it !in uris) uris.add(it) }
+                if (uris.isEmpty()) {
+                    finishPickFile(mapOf("ok" to false, "cancelled" to true))
+                    return
+                }
+                deliverPickedFiles(uris)
+            }
+
+            REQUEST_CAPTURE_PHOTO -> {
+                if (resultCode != android.app.Activity.RESULT_OK) {
+                    finishPickImage(mapOf("ok" to false, "cancelled" to true))
+                    return
+                }
+                val file = pendingCameraFile
+                if (file == null || !file.exists()) {
+                    finishPickImage(mapOf("ok" to false, "error" to "相机照片读取失败"))
+                    return
+                }
+                val bytes = try { file.readBytes() } catch (e: Exception) { null }
+                val name = file.name
+                file.delete()
+                pendingCameraFile = null
+                deliverPickedImage(bytes, name)
+            }
+        }
+    }
+
+    companion object {
+        const val MODULE_NAME = "HRBridgeModule"
+        const val REQUEST_SSH_KEY = 4091
+        const val REQUEST_PICK_IMAGE = 4092
+        const val REQUEST_CAPTURE_PHOTO = 4093
+        const val REQUEST_RECORD_AUDIO = 4094
+        const val REQUEST_PICK_FILE = 4095
+        const val REQUEST_SSH_KEY_PERMISSION = 4096
+
+        /** 与 host-plugin 附件端点上限保持一致。 */
+        const val MAX_PICK_FILE_BYTES = 50 * 1024 * 1024
+        private var activeInstance: KRBridgeModule? = null
+
+        fun dispatchActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+            activeInstance?.onActivityResult(requestCode, resultCode, data)
+        }
+
+        fun dispatchPermissionResult(requestCode: Int, grantResults: IntArray) {
+            activeInstance?.onRequestPermissionsResult(requestCode, grantResults)
+        }
+    }
+}
+
+private fun JSONObject.toMap(): Map<Any, Any> {
+    val map = mutableMapOf<Any, Any>()
+    val keys = keys()
+    while (keys.hasNext()) {
+        val key = keys.next()
+        when (val v = opt(key)) {
+            is JSONObject -> {
+                map[key] = v.toMap()
+            }
+
+            else -> {
+                v?.also {
+                    map[key] = it
+                }
+            }
+        }
+    }
+    return map
+}

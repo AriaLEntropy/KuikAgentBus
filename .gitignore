@@ -1,0 +1,70 @@
+*.iml
+.gradle
+/local.properties
+.idea
+.DS_Store
+/build
+*/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+*.so
+node_modules
+Pods
+Pods/*
+Pods-iosApp/*
+Kotlin-js-store
+.kotlin
+
+## Various settings
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+**/xcuserdata/**
+**/*.xcuserdatad/**
+**/xcshareddata/
+**/IDEWorkspaceChecks.plist
+
+## Other
+*.moved-aside
+*.xccheckout
+*.xcscmblueprint
+*.xcbkptlist
+*.pyc
+## Agent skills (tool-generated, not part of product code)
+.agents/
+.claude/
+agent/skills/
+skills-lock.json
+
+## Local test artifacts (screenshots, build logs, ad-hoc captures)
+*.log
+/*.png
+/*.apk
+
+# === agent scratch / verification artifacts ===
+ui*.xml
+dsh-pull*.db
+dsh-pull*.db-wal
+inspect_*.py
+read_sessions.py
+session-list-*.json
+verify-*.png
+
+# === local editor / temp files (not part of product code) ===
+.cursor/
+CLAUDE.md
+rules/
+kuikly-input-*.md
+docs/harness-*.md
+docs/uiux-log-filter-design*.html
+
+# 本地签名库与改版记录，不入库
+/keystore/
+/docs/
