@@ -2,6 +2,7 @@ package com.kuikagentbus.module
 
 import android.app.Activity
 import android.content.Intent
+import com.kuikagentbus.relay.ArtifactFetch
 import com.kuikagentbus.relay.AgentHostBus
 import com.kuikagentbus.relay.DshQrScanActivity
 import com.kuikagentbus.relay.DshRelayManager
@@ -66,6 +67,27 @@ internal class KRDshRelayModule : KuiklyRenderBaseModule() {
                             ),
                         )
                     }
+                }
+            }
+            null
+        }
+        "busFetchArtifact" -> {
+            val args = runCatching { JSONObject(params ?: "{}") }.getOrNull()
+            val artifactId = args?.optString("artifactId").orEmpty()
+            val contentType = args?.optString("contentType").orEmpty()
+            val cacheRoot = activity?.cacheDir
+            if (cacheRoot == null) {
+                callback?.invoke(mapOf("state" to "failed", "reason" to "no_context"))
+            } else {
+                thread(name = "agent-host-artifact") {
+                    val result = AgentHostBus.fetchArtifact(cacheRoot, artifactId, contentType)
+                    val payload = when (result) {
+                        is ArtifactFetch.Ready -> mapOf("state" to "ready", "path" to result.path)
+                        ArtifactFetch.Offline -> mapOf("state" to "offline")
+                        ArtifactFetch.NotFound -> mapOf("state" to "not_found")
+                        is ArtifactFetch.Failed -> mapOf("state" to "failed", "reason" to result.reason)
+                    }
+                    activity?.runOnUiThread { callback?.invoke(payload) }
                 }
             }
             null

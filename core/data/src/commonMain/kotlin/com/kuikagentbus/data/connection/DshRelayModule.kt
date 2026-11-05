@@ -24,6 +24,20 @@ data class DshBusCommandAck(
     val body: String = "",
 )
 
+/**
+ * 产物字节取回的结果（FR-9.2）
+ *
+ * state 只有四种：ready / offline / not_found / failed。
+ * ready 时 path 是本机可读路径；not_found 表示电脑那边 7 天保留期已过或从没写过
+ */
+data class DshBusArtifactResult(
+    val state: String,
+    val path: String = "",
+    val reason: String = "",
+) {
+    val ready: Boolean get() = state == "ready" && path.isNotBlank()
+}
+
 data class DshRelayPairResult(
     val ok: Boolean,
     val message: String = "",
@@ -99,9 +113,30 @@ class DshRelayModule : Module() {
         }, false)
     }
 
+    /**
+     * 按需取一个产物的字节（FR-9.2）
+     *
+     * 原生层负责下载、写缓存和淘汰，这里只回状态与本机可读路径。
+     * `offline` 表示隧道还没就绪，界面按需求写「电脑离线，暂时无法加载」
+     */
+    fun busFetchArtifact(artifactId: String, contentType: String, onResult: (DshBusArtifactResult) -> Unit) {
+        val params = JSONObject().apply {
+            put("artifactId", artifactId)
+            put("contentType", contentType)
+        }
+        toNative(true, "busFetchArtifact", params.toString(), { value ->
+            onResult(
+                DshBusArtifactResult(
+                    state = value?.optString("state").orEmpty(),
+                    path = value?.optString("path").orEmpty(),
+                    reason = value?.optString("reason").orEmpty(),
+                ),
+            )
+        }, false)
+    }
+
     /** 读取某任务通过 `taskMessages` 事件缓存下来的消息 JSON。 */
-    fun busTaskMessages(taskId: String): String? {
-        val params = JSONObject().apply { put("taskId", taskId) }
+    fun busTaskMessages(taskId: String): String? {        val params = JSONObject().apply { put("taskId", taskId) }
         val raw = toNative(false, "busTaskMessages", params.toString(), null, true).toString()
         return runCatching { JSONObject(raw).optString("json") }
             .getOrNull()

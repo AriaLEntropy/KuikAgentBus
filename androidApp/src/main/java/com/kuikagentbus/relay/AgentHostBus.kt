@@ -2,7 +2,11 @@ package com.kuikagentbus.relay
 
 import android.util.Log
 import com.kuikagentbus.protocol.BusChannel
+import com.kuikagentbus.protocol.BusArtifactEntry
 import com.kuikagentbus.protocol.BusStore
+import com.kuikagentbus.protocol.busArtifactEviction
+import com.kuikagentbus.protocol.busArtifactFileName
+import com.kuikagentbus.protocol.busArtifactIdUsable
 import com.kuikagentbus.protocol.BusSync
 import com.kuikagentbus.protocol.DescribeAttempts
 import com.kuikagentbus.protocol.DescribeDecision
@@ -23,6 +27,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import java.io.File
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -342,6 +347,80 @@ internal object AgentHostBus {
             .build()
         return client.newCall(request).execute()
     }
+
+    /**
+     * 取一个产物的字节（FR-9.2）：`GET /bus/artifacts/:id` → 写本机缓存 → 回可读路径
+     *
+     * 只在后台线程调用，调用方是 KRDshRelayModule 里起的那条线程。
+     * id 校验、文件命名和淘汰都调 shared 侧的同一套规则，两端不会各写一份。
+     * 产物字节不进快照也不走事件帧，协议规定就是按需取
+     */
+    fun fetchArtifact(cacheRoot: File, artifactId: String, contentType: String): ArtifactFetch {
+        if (!busArtifactIdUsable(artifactId)) return ArtifactFetch.Failed("artifact_id")
+        val port = commandPort
+        val token = commandToken
+        if (port <= 0 || token.isEmpty()) return ArtifactFetch.Offline
+
+        val dir = File(cacheRoot, ARTIFACT_CACHE_DIR_NAME).apply { mkdirs() }
+        val target = File(dir, busArtifactFileName(artifactId, contentType))
+        if (target.isFile && target.length() > 0) {
+            // 命中缓存也要把「最后用到」往前推，否则正在看的图会被自己挤掉
+            target.setLastModified(System.currentTimeMillis())
+            return ArtifactFetch.Ready(target.absolutePath)
+        }
+
+        val client = OkHttpClient.Builder().callTimeout(30, TimeUnit.SECONDS).build()
+        val request = Request.Builder()
+            .url("http://127.0.0.1:$port/bus/artifacts/$artifactId")
+            .header("Authorization", "Bearer $token")
+            .build()
+        return runCatching {
+            client.newCall(request).execute().use { response ->
+                when (response.code) {
+                    // 电脑那边 7 天保留期过了，或这个 id 从没写过
+                    404 -> ArtifactFetch.NotFound
+                    200 -> {
+                        val bytes = response.body?.bytes()
+                        if (bytes == null || bytes.isEmpty()) {
+                            ArtifactFetch.Failed("empty_body")
+                        } else {
+                            val temp = File(dir, "${target.name}.tmp")
+                            temp.writeBytes(bytes)
+                            if (!temp.renameTo(target)) {
+                                temp.delete()
+                                ArtifactFetch.Failed("write")
+                            } else {
+                                evictArtifactCache(dir, keep = target.name)
+                                ArtifactFetch.Ready(target.absolutePath)
+                            }
+                        }
+                    }
+                    else -> ArtifactFetch.Failed("http_${response.code}")
+                }
+            }
+        }.getOrElse { ArtifactFetch.Failed("network") }
+    }
+
+    /** 超量时按「最后一次用到」淘汰，刚写入的那条不参与 */
+    private fun evictArtifactCache(dir: File, keep: String) {
+        val entries = dir.listFiles().orEmpty()
+            .filter { it.isFile && !it.name.endsWith(".tmp") }
+            .map { BusArtifactEntry(fileName = it.name, bytes = it.length(), lastUsedAt = it.lastModified()) }
+        for (victim in busArtifactEviction(entries, keep)) {
+            runCatching { File(dir, victim.fileName).delete() }
+        }
+    }
+}
+
+/** 产物缓存单独一个子目录，方便整体清理，也不会和别的缓存文件混在一起 */
+private const val ARTIFACT_CACHE_DIR_NAME = "bus-artifacts"
+
+/** 取字节的结果；手机按状态显示不同文案，FR-9.2 要求离线时说明「电脑离线，暂时无法加载」 */
+internal sealed class ArtifactFetch {
+    data class Ready(val path: String) : ArtifactFetch()
+    object Offline : ArtifactFetch()
+    object NotFound : ArtifactFetch()
+    data class Failed(val reason: String) : ArtifactFetch()
 }
 
 internal data class BusCommandAck(val status: Int, val body: String)
