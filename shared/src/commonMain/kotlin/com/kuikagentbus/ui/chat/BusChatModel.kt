@@ -405,5 +405,61 @@ internal fun busChatImageAttachments(message: DshMessage): List<DshMessageAttach
 internal fun busChatNeedsImagePlaceholder(message: DshMessage): Boolean =
     message.content.isBlank() && message.attachments.isEmpty()
 
+/**
+ * 产物字节的取回状态（FR-9.2）
+ *
+ * 界面只认这五个值。原生层回的状态串在 busChatArtifactState 里一次性翻译完，
+ * 别把 "offline" 这类字面量散到 UI 分支里
+ */
+internal enum class BusChatArtifactStatus { Loading, Ready, Offline, NotFound, Failed }
+
+internal data class BusChatArtifactState(
+    val status: BusChatArtifactStatus,
+    /** 本机可读路径，只有 Ready 时非空 */
+    val path: String = "",
+    /** 给用户的这句话；Loading 时为空，界面用通用占位词 */
+    val label: String = "",
+    /** 只进日志、不上界面的技术原因 */
+    val reason: String = "",
+)
+
+/** FR-9.2 验收第 2 条写死的串 */
+internal const val BUS_CHAT_ARTIFACT_OFFLINE = "电脑离线，暂时无法加载"
+
+/** 404：阶段一产物只存在电脑本机，超保留期或被清掉就是取不到 */
+internal const val BUS_CHAT_ARTIFACT_NOT_FOUND = "电脑上已经没有这张图"
+
+/** 其余失败不猜原因，界面只给一句；reason 留给日志 */
+internal const val BUS_CHAT_ARTIFACT_FAILED = "加载失败，请稍后再试"
+
+/** 灰块上的占位词，FR-6.3 与 FR-9.2 用同一个 */
+internal const val BUS_CHAT_IMAGE_PLACEHOLDER = "图片"
+
+/** busFetchArtifact 的三个字段 → 界面状态；ready 但没路径按失败处理，界面才不会拿到空路径去加载 */
+internal fun busChatArtifactState(state: String, path: String, reason: String): BusChatArtifactState = when {
+    state == "ready" && path.isNotBlank() ->
+        BusChatArtifactState(BusChatArtifactStatus.Ready, path = path)
+
+    state == "offline" ->
+        BusChatArtifactState(BusChatArtifactStatus.Offline, label = BUS_CHAT_ARTIFACT_OFFLINE, reason = reason)
+
+    state == "not_found" ->
+        BusChatArtifactState(BusChatArtifactStatus.NotFound, label = BUS_CHAT_ARTIFACT_NOT_FOUND, reason = reason)
+
+    else ->
+        BusChatArtifactState(BusChatArtifactStatus.Failed, label = BUS_CHAT_ARTIFACT_FAILED, reason = reason)
+}
+
+/**
+ * 缩略图行下面那句提示
+ *
+ * 96 宽的块放不下「电脑离线，暂时无法加载」，所以提示挂在气泡里整句显示；
+ * 多张同时失败也只报第一个，不会堆成 4 行。还在路上（Loading）时不提示
+ */
+internal fun busChatArtifactNotice(states: List<BusChatArtifactState>): String =
+    states.firstOrNull { it.status != BusChatArtifactStatus.Ready && it.status != BusChatArtifactStatus.Loading }
+        ?.label
+        .orEmpty()
+
 private fun JsonObject.stringField(key: String): String =
     (this[key] as? JsonPrimitive)?.contentOrNull ?: ""

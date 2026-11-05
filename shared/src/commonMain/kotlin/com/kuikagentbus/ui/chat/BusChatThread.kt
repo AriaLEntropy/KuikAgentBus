@@ -142,6 +142,7 @@ internal fun ViewContainer<*, *>.BusChatMessageRow(
     expanded: () -> Boolean,
     onToggleTools: () -> Unit,
     onSelectStep: (Int) -> Unit,
+    artifactState: (DshMessageAttachment) -> BusChatArtifactState,
 ) {
     val width = contentWidth.coerceAtLeast(0f)
     when (row) {
@@ -152,6 +153,7 @@ internal fun ViewContainer<*, *>.BusChatMessageRow(
                 busChatImageAttachments(row.message),
                 palette,
                 width,
+                artifactState,
             )
             DshMessageRole.TOOL -> BusChatToolRow(row, palette, expanded, onToggleTools, onSelectStep)
             else -> BusChatAssistantBody(row.message.content, palette, width, streaming)
@@ -170,8 +172,11 @@ private fun ViewContainer<*, *>.BusChatUserBubble(
     images: List<DshMessageAttachment>,
     palette: BusChatPalette,
     contentWidth: Float,
+    artifactState: (DshMessageAttachment) -> BusChatArtifactState,
 ) {
     val body = content.trim()
+    val shown = images.take(BUS_CHAT_MAX_IMAGES)
+    val textMaxWidth = contentWidth * BusChatTokens.bubbleMaxRatio - BusChatTokens.bubblePaddingH * 2f
     View {
         attr {
             alignSelfFlexEnd()
@@ -193,7 +198,7 @@ private fun ViewContainer<*, *>.BusChatUserBubble(
             paddingLeft(BusChatTokens.bubblePaddingH)
             paddingRight(BusChatTokens.bubblePaddingH)
         }
-        if (images.isNotEmpty()) {
+        if (shown.isNotEmpty()) {
             // 缩略图排在正文上方，一行排不下就换行；协议 FR-9.1 一条消息最多 4 张
             View {
                 attr {
@@ -201,8 +206,22 @@ private fun ViewContainer<*, *>.BusChatUserBubble(
                     flexWrap(FlexWrap.WRAP)
                     marginBottom(if (body.isEmpty()) 0f else busChatPx(6f))
                 }
-                images.take(BUS_CHAT_MAX_IMAGES).forEach { attachment ->
-                    BusChatImageTile(attachment, palette)
+                shown.forEach { attachment ->
+                    BusChatImageTile(attachment, palette, artifactState(attachment))
+                }
+            }
+            // 取回失败/离线时整条气泡挂一句提示：96 宽的块放不下「电脑离线，暂时无法加载」
+            val notice = busChatArtifactNotice(shown.map(artifactState))
+            if (notice.isNotBlank()) {
+                Text {
+                    attr {
+                        text(notice)
+                        fontSize(busChatPx(12f))
+                        lineHeight(busChatPx(16f))
+                        color(palette.faint)
+                        maxWidth(textMaxWidth)
+                        lines(2)
+                    }
                 }
             }
         }
@@ -214,10 +233,7 @@ private fun ViewContainer<*, *>.BusChatUserBubble(
                     lineHeight(BusChatTokens.bodyLine)
                     color(palette.ink)
                     // 气泡只给了 maxWidth，Text 还要自己知道上限才会折行
-                    maxWidth(
-                        contentWidth * BusChatTokens.bubbleMaxRatio -
-                            BusChatTokens.bubblePaddingH * 2f,
-                    )
+                    maxWidth(textMaxWidth)
                     lines(Int.MAX_VALUE)
                 }
             }
@@ -227,7 +243,7 @@ private fun ViewContainer<*, *>.BusChatUserBubble(
             // 这里走上面那条分支，原位换成缩略图，不新增一行
             Text {
                 attr {
-                    text("图片")
+                    text(BUS_CHAT_IMAGE_PLACEHOLDER)
                     fontSize(busChatPx(14f))
                     color(palette.faint)
                 }
@@ -237,25 +253,28 @@ private fun ViewContainer<*, *>.BusChatUserBubble(
 }
 
 /**
- * 一条随文图片的缩略图位置
+ * 一条随文图片的缩略图
  *
- * 字节还没取回来（FR-9.2 的下载与缓存还没接），所以先是一块按附件宽高比留出来的灰块；
+ * 字节到手（FR-9.2 的缓存命中或下载完成）就直接画本机文件；
+ * 还在路上或取不到时留一块按附件宽高比撑开的灰块，说明句由气泡统一挂在下面。
  * 附件没给宽高就按 1:1，比例限制在 0.55~1.8 之间，避免长截图把气泡撑成一列
  */
 private fun ViewContainer<*, *>.BusChatImageTile(
     attachment: DshMessageAttachment,
     palette: BusChatPalette,
+    state: BusChatArtifactState,
 ) {
     val ratio = if (attachment.width > 0 && attachment.height > 0) {
         attachment.height.toFloat() / attachment.width.toFloat()
     } else {
         1f
     }
-    val heightDesign = (BUS_CHAT_IMAGE_SIDE * ratio).coerceIn(52f, 172f)
+    val tileWidth = busChatPx(BUS_CHAT_IMAGE_SIDE)
+    val tileHeight = busChatPx((BUS_CHAT_IMAGE_SIDE * ratio).coerceIn(52f, 172f))
     View {
         attr {
-            width(busChatPx(BUS_CHAT_IMAGE_SIDE))
-            height(busChatPx(heightDesign))
+            width(tileWidth)
+            height(tileHeight)
             marginRight(busChatPx(6f))
             marginBottom(busChatPx(6f))
             borderRadius(busChatPx(10f))
@@ -264,11 +283,21 @@ private fun ViewContainer<*, *>.BusChatImageTile(
             justifyContentCenter()
             alignItemsCenter()
         }
-        Text {
-            attr {
-                text("图片")
-                fontSize(busChatPx(12f))
-                color(palette.mut)
+        if (state.status == BusChatArtifactStatus.Ready) {
+            Image {
+                attr {
+                    size(tileWidth, tileHeight)
+                    src(ImageUri.file(state.path))
+                    resizeCover()
+                }
+            }
+        } else {
+            Text {
+                attr {
+                    text(BUS_CHAT_IMAGE_PLACEHOLDER)
+                    fontSize(busChatPx(12f))
+                    color(palette.mut)
+                }
             }
         }
     }

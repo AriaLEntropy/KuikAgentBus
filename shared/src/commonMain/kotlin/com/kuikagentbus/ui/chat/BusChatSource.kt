@@ -171,6 +171,14 @@ internal interface ConversationSource {
 
     /** 协议 3.8：永久删除一条已停止的会话；成功后电脑发 taskRemoved。 */
     fun deleteTask(agentId: String, taskId: String, onDone: (ok: Boolean, error: String) -> Unit)
+
+    /**
+     * FR-9.2：按需取一个产物文件的字节，回本机可读路径或失败状态
+     *
+     * 下载、写缓存、超量淘汰都在原生层；同一个 id 的在途去重归页面管，
+     * 这里只把原生回的三个字段翻译成界面状态
+     */
+    fun fetchArtifact(artifactId: String, contentType: String, onDone: (BusChatArtifactState) -> Unit)
 }
 
 /**
@@ -629,6 +637,20 @@ internal class BusChatSource(
                 is BusSendResult.Failed -> onDone(false, operationFailure(result, "删除失败"))
                 else -> onDone(false, result.message)
             }
+        }
+    }
+
+    override fun fetchArtifact(
+        artifactId: String,
+        contentType: String,
+        onDone: (BusChatArtifactState) -> Unit,
+    ) {
+        if (artifactId.isBlank()) {
+            onDone(busChatArtifactState("failed", "", "empty_artifact_id"))
+            return
+        }
+        relay.busFetchArtifact(artifactId, contentType) { result ->
+            onDone(busChatArtifactState(result.state, result.path, result.reason))
         }
     }
 

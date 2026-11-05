@@ -185,6 +185,8 @@ internal object DshRelayManager {
 
     fun forget() {
         disconnect()
+        // FR-9.2 验收：解除配对时清掉这台电脑的产物缓存
+        appContext?.cacheDir?.let { AgentHostBus.clearArtifactCache(it) }
         secrets?.clear()
         hostId = ""
         hostName = ""

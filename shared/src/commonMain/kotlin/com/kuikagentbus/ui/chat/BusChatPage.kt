@@ -7,6 +7,7 @@ import com.kuikagentbus.protocol.BUS_DELETE_TASK_CONFIRM_TITLE
 import com.kuikagentbus.protocol.busCanDeleteTask
 import com.kuikagentbus.data.connection.DshRelayModule
 import com.kuikagentbus.data.message.DshMessage
+import com.kuikagentbus.data.message.DshMessageAttachment
 import com.kuikagentbus.platform.currentTimeMillis
 import com.kuikagentbus.theme.DshColorTokens
 import com.kuikagentbus.ui.dshTopInset
@@ -154,6 +155,17 @@ internal class BusChatPage : BasePager() {
     private var skillContentLoading by observable(false)
     private var skillContentError by observable("")
     private val workspaces by observableList<BusChatWorkspace>()
+
+    /**
+     * FR-9.2：产物字节的取回状态，键是 artifactId
+     *
+     * 渲染缩略图时才查这个表，没见过就顺手发起下载；Feed 用 vforLazy，
+     * 只有进屏的行会执行，等于需求里那句「出现图片 → 没有就下载」
+     */
+    private var artifactStates by observable<Map<String, BusChatArtifactState>>(emptyMap())
+
+    /** 在途的 artifactId，防同一张图被连续重组请求多次 */
+    private val artifactInFlight = mutableSetOf<String>()
 
     private var chatSource: ConversationSource? = null
     private var inputView: InputView? = null
@@ -590,6 +602,30 @@ internal class BusChatPage : BasePager() {
     }
 
     /**
+     * 一块缩略图现在的取回状态
+     *
+     * 第一次遇到就顺手发起下载并立刻记成 Loading，之后的重组只会读表；
+     * 终态（离线 / 取不到 / 失败）粘住不自动重试，隧道断着的时候滚动会把同一批图反复送进屏
+     */
+    private fun artifactStateOf(attachment: DshMessageAttachment): BusChatArtifactState {
+        artifactStates[attachment.artifactId]?.let { return it }
+        loadArtifact(attachment)
+        return BusChatArtifactState(BusChatArtifactStatus.Loading)
+    }
+
+    private fun loadArtifact(attachment: DshMessageAttachment) {
+        val id = attachment.artifactId
+        val source = chatSource
+        if (id.isBlank() || source == null || !artifactInFlight.add(id)) return
+        artifactStates = artifactStates + (id to BusChatArtifactState(BusChatArtifactStatus.Loading))
+        source.fetchArtifact(id, attachment.contentType) { state ->
+            artifactInFlight.remove(id)
+            if (!alive) return@fetchArtifact
+            artifactStates = artifactStates + (id to state)
+        }
+    }
+
+    /**
      * 点折叠行：在对话流里就地展开/收起步骤列表（稿子③的中间层）
      *
      * 不再用底部浮层代替这一层——浮层会遮住正文、还跳过用户最常做的一次操作
@@ -914,6 +950,9 @@ internal class BusChatPage : BasePager() {
                                                     },
                                                     onSelectStep = { index ->
                                                         this@BusChatPage.openStepDetail(item.row, index)
+                                                    },
+                                                    artifactState = { attachment ->
+                                                        this@BusChatPage.artifactStateOf(attachment)
                                                     },
                                                 )
 

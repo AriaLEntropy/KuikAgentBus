@@ -410,6 +410,16 @@ internal object AgentHostBus {
             runCatching { File(dir, victim.fileName).delete() }
         }
     }
+
+    /**
+     * 清掉本机缓存的产物字节（FR-9.2 验收：解除配对时清掉这台电脑的缓存）
+     *
+     * 缓存文件名只有 artifactId + 扩展名，不带 hostId，所以整个目录删掉就等于
+     * 「这台电脑的缓存」。多台电脑并存时要先改成按 hostId 分子目录
+     */
+    fun clearArtifactCache(cacheRoot: File) {
+        runCatching { File(cacheRoot, ARTIFACT_CACHE_DIR_NAME).deleteRecursively() }
+    }
 }
 
 /** 产物缓存单独一个子目录，方便整体清理，也不会和别的缓存文件混在一起 */
