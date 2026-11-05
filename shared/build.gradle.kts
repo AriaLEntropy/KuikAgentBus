@@ -60,15 +60,10 @@ kotlin {
     sourceSets {
         val commonMain by getting {
             dependencies {
-                api(project(":core-model"))
                 api(project(":core-platform"))
                 api(project(":core-log"))
-                api(project(":core-theme"))
                 api(project(":core-data"))
-                api(project(":ui-base"))
-                api(project(":ui-kit"))
-                                                api(project(":ui-settings"))
-                                implementation("com.tencent.kuikly-open:core:${Version.getKuiklyVersion()}")
+                implementation("com.tencent.kuikly-open:core:${Version.getKuiklyVersion()}")
                 implementation("com.tencent.kuikly-open:core-annotations:${Version.getKuiklyVersion()}")
                 implementation("com.tencent.kuiklybase:KuiklyMarkdown:1.0.6-2.1.21")
                 implementation("com.tencent.kuiklybase:KuiklyWebview:1.0.1-2.0.21")

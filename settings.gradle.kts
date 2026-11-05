@@ -28,14 +28,9 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "DSH"
-include(":core-model")
+rootProject.name = "KuikAgentBus"
 include(":core-platform")
 include(":core-log")
-include(":core-theme")
 include(":core-data")
-include(":ui-base")
-include(":ui-kit")
-include(":ui-settings")
 include(":androidApp")
 include(":shared")

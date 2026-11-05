@@ -27,10 +27,8 @@ kotlin {
     sourceSets {
         val commonMain by getting {
             dependencies {
-                api(project(":core-model"))
                 api(project(":core-platform"))
                 api(project(":core-log"))
-                api(project(":core-theme"))
                 implementation("com.tencent.kuikly-open:core:${Version.getKuiklyVersion()}")
                 implementation("com.tencent.kuikly-open:core-annotations:${Version.getKuiklyVersion()}")
                 api("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.1")
