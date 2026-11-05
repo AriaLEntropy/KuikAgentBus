@@ -38,6 +38,22 @@ data class DshBusArtifactResult(
     val ready: Boolean get() = state == "ready" && path.isNotBlank()
 }
 
+/**
+ * 图片上传的结果（FR-9.1）
+ *
+ * state 四种：uploaded / offline / rejected / failed。
+ * uploaded 时 artifactId 就是刚写进电脑的那个 id，可以直接放进 attachments；
+ * rejected 的 reason 是电脑回的错误码（too_large / unsupported_media_type / invalid_artifact_id）
+ */
+data class DshBusUploadResult(
+    val state: String,
+    val artifactId: String = "",
+    val size: Long = 0L,
+    val reason: String = "",
+) {
+    val uploaded: Boolean get() = state == "uploaded" && artifactId.isNotBlank()
+}
+
 data class DshRelayPairResult(
     val ok: Boolean,
     val message: String = "",
@@ -129,6 +145,29 @@ class DshRelayModule : Module() {
                 DshBusArtifactResult(
                     state = value?.optString("state").orEmpty(),
                     path = value?.optString("path").orEmpty(),
+                    reason = value?.optString("reason").orEmpty(),
+                ),
+            )
+        }, false)
+    }
+
+    /**
+     * 传一张图到电脑（FR-9.1）
+     *
+     * 字节由原生层负责 PUT 到 `/bus/uploads/:id`，id 也在那边生成（16 随机字节的 base64url）；
+     * 这里只送 base64 文本与类型，回 artifactId 给上层拼进 attachments
+     */
+    fun busUploadArtifact(dataBase64: String, contentType: String, onResult: (DshBusUploadResult) -> Unit) {
+        val params = JSONObject().apply {
+            put("dataBase64", dataBase64)
+            put("contentType", contentType)
+        }
+        toNative(true, "busUploadArtifact", params.toString(), { value ->
+            onResult(
+                DshBusUploadResult(
+                    state = value?.optString("state").orEmpty(),
+                    artifactId = value?.optString("artifactId").orEmpty(),
+                    size = value?.optString("size")?.toLongOrNull() ?: 0L,
                     reason = value?.optString("reason").orEmpty(),
                 ),
             )

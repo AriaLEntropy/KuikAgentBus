@@ -7,6 +7,8 @@ import com.kuikagentbus.protocol.BusStore
 import com.kuikagentbus.protocol.busArtifactEviction
 import com.kuikagentbus.protocol.busArtifactFileName
 import com.kuikagentbus.protocol.busArtifactIdUsable
+import com.kuikagentbus.protocol.busUploadContentTypeAllowed
+import com.kuikagentbus.protocol.busUploadSizeAllowed
 import com.kuikagentbus.protocol.BusSync
 import com.kuikagentbus.protocol.DescribeAttempts
 import com.kuikagentbus.protocol.DescribeDecision
@@ -412,6 +414,39 @@ internal object AgentHostBus {
     }
 
     /**
+     * 传一张图上去（FR-9.1）：`PUT /bus/uploads/:artifactId`
+     *
+     * 类型、大小和 id 三道闸门都复用 shared 里的同一套规则，客户端先挡一遍，
+     * 电脑回的 413/415/400 再兜一遍，两边不会各写一份口径
+     */
+    fun uploadArtifact(artifactId: String, contentType: String, bytes: ByteArray): ArtifactUpload {
+        if (!busArtifactIdUsable(artifactId)) return ArtifactUpload.Rejected("invalid_artifact_id")
+        if (!busUploadContentTypeAllowed(contentType)) return ArtifactUpload.Rejected("unsupported_media_type")
+        if (!busUploadSizeAllowed(bytes.size.toLong())) return ArtifactUpload.Rejected("too_large")
+        val port = commandPort
+        val token = commandToken
+        if (port <= 0 || token.isEmpty()) return ArtifactUpload.Offline
+
+        val client = OkHttpClient.Builder().callTimeout(30, TimeUnit.SECONDS).build()
+        val request = Request.Builder()
+            .url("http://127.0.0.1:$port/bus/uploads/$artifactId")
+            .header("Authorization", "Bearer $token")
+            .put(bytes.toRequestBody(contentType.toMediaType()))
+            .build()
+        return runCatching {
+            client.newCall(request).execute().use { response ->
+                when (response.code) {
+                    201 -> ArtifactUpload.Uploaded(artifactId, bytes.size.toLong())
+                    413 -> ArtifactUpload.Rejected("too_large")
+                    415 -> ArtifactUpload.Rejected("unsupported_media_type")
+                    400 -> ArtifactUpload.Rejected("invalid_artifact_id")
+                    else -> ArtifactUpload.Failed("http_${response.code}")
+                }
+            }
+        }.getOrElse { ArtifactUpload.Failed("network") }
+    }
+
+    /**
      * 清掉本机缓存的产物字节（FR-9.2 验收：解除配对时清掉这台电脑的缓存）
      *
      * 缓存文件名只有 artifactId + 扩展名，不带 hostId，所以整个目录删掉就等于
@@ -431,6 +466,14 @@ internal sealed class ArtifactFetch {
     object Offline : ArtifactFetch()
     object NotFound : ArtifactFetch()
     data class Failed(val reason: String) : ArtifactFetch()
+}
+
+/** 上传的结果；rejected 带的是电脑回的那几个错误码，界面不显示它本身 */
+internal sealed class ArtifactUpload {
+    data class Uploaded(val artifactId: String, val size: Long) : ArtifactUpload()
+    object Offline : ArtifactUpload()
+    data class Rejected(val reason: String) : ArtifactUpload()
+    data class Failed(val reason: String) : ArtifactUpload()
 }
 
 internal data class BusCommandAck(val status: Int, val body: String)

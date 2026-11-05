@@ -2,7 +2,10 @@ package com.kuikagentbus.module
 
 import android.app.Activity
 import android.content.Intent
+import com.kuikagentbus.protocol.BUS_UPLOAD_ID_BYTES
+import com.kuikagentbus.protocol.busBase64Url
 import com.kuikagentbus.relay.ArtifactFetch
+import com.kuikagentbus.relay.ArtifactUpload
 import com.kuikagentbus.relay.AgentHostBus
 import com.kuikagentbus.relay.DshFileOpen
 import com.kuikagentbus.relay.DshQrScanActivity
@@ -12,6 +15,7 @@ import com.tencent.kuikly.core.render.android.export.KuiklyRenderBaseModule
 import com.tencent.kuikly.core.render.android.export.KuiklyRenderCallback
 import org.json.JSONObject
 import java.io.File
+import java.security.SecureRandom
 import kotlin.concurrent.thread
 
 internal class KRDshRelayModule : KuiklyRenderBaseModule() {
@@ -88,6 +92,35 @@ internal class KRDshRelayModule : KuiklyRenderBaseModule() {
                         ArtifactFetch.Offline -> mapOf("state" to "offline")
                         ArtifactFetch.NotFound -> mapOf("state" to "not_found")
                         is ArtifactFetch.Failed -> mapOf("state" to "failed", "reason" to result.reason)
+                    }
+                    activity?.runOnUiThread { callback?.invoke(payload) }
+                }
+            }
+            null
+        }
+        "busUploadArtifact" -> {
+            val args = runCatching { JSONObject(params ?: "{}") }.getOrNull()
+            val raw = args?.optString("dataBase64").orEmpty().substringAfterLast(',')
+            val contentType = args?.optString("contentType").orEmpty()
+            val bytes = runCatching {
+                android.util.Base64.decode(raw, android.util.Base64.DEFAULT)
+            }.getOrNull()
+            if (bytes == null || bytes.isEmpty()) {
+                callback?.invoke(mapOf("state" to "rejected", "reason" to "empty_bytes"))
+            } else {
+                val random = ByteArray(BUS_UPLOAD_ID_BYTES).also { SecureRandom().nextBytes(it) }
+                val artifactId = busBase64Url(random)
+                thread(name = "agent-host-upload") {
+                    val payload = when (val result = AgentHostBus.uploadArtifact(artifactId, contentType, bytes)) {
+                        is ArtifactUpload.Uploaded -> mapOf(
+                            "state" to "uploaded",
+                            "artifactId" to result.artifactId,
+                            "size" to result.size.toString(),
+                        )
+
+                        ArtifactUpload.Offline -> mapOf("state" to "offline")
+                        is ArtifactUpload.Rejected -> mapOf("state" to "rejected", "reason" to result.reason)
+                        is ArtifactUpload.Failed -> mapOf("state" to "failed", "reason" to result.reason)
                     }
                     activity?.runOnUiThread { callback?.invoke(payload) }
                 }

@@ -23,6 +23,7 @@ object BusCommands {
         model: String? = null,
         effort: String? = null,
         autoApprove: Boolean? = null,
+        attachments: List<BusUploadAttachment> = emptyList(),
     ): String = buildJsonObject {
         put("id", JsonPrimitive(commandId))
         put("createdAt", JsonPrimitive(createdAt))
@@ -36,6 +37,8 @@ object BusCommands {
             if (!model.isNullOrBlank()) put("model", JsonPrimitive(model))
             if (!effort.isNullOrBlank()) put("effort", JsonPrimitive(effort))
             if (autoApprove != null) put("autoApprove", JsonPrimitive(autoApprove))
+            // FR-9.1：没附件时整个键省略；只发图不带文字时 prompt 就是空串，照旧写出
+            if (attachments.isNotEmpty()) put("attachments", busUploadAttachmentsJson(attachments))
         })
     }.toString()
 
@@ -48,6 +51,7 @@ object BusCommands {
         model: String? = null,
         effort: String? = null,
         autoApprove: Boolean? = null,
+        attachments: List<BusUploadAttachment> = emptyList(),
     ): String = buildJsonObject {
         put("id", JsonPrimitive(commandId))
         put("createdAt", JsonPrimitive(createdAt))
@@ -59,6 +63,7 @@ object BusCommands {
             if (!model.isNullOrBlank()) put("model", JsonPrimitive(model))
             if (!effort.isNullOrBlank()) put("effort", JsonPrimitive(effort))
             if (autoApprove != null) put("autoApprove", JsonPrimitive(autoApprove))
+            if (attachments.isNotEmpty()) put("attachments", busUploadAttachmentsJson(attachments))
         })
     }.toString()
 
