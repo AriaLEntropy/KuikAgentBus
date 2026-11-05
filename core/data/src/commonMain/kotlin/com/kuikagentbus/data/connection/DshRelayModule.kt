@@ -135,8 +135,25 @@ class DshRelayModule : Module() {
         }, false)
     }
 
+    /**
+     * 把已经取回本机的文件交给系统应用打开（FR-9.4 的终点）
+     *
+     * 原生层用 FileProvider 换成 content:// 并只给读权限。
+     * 回的状态串：`opened` / `missing` / `no_handler` / `failed`
+     */
+    fun busOpenFile(path: String, contentType: String, onResult: (String) -> Unit) {
+        val params = JSONObject().apply {
+            put("path", path)
+            put("contentType", contentType)
+        }
+        toNative(true, "busOpenFile", params.toString(), { value ->
+            onResult(value?.optString("state").orEmpty())
+        }, false)
+    }
+
     /** 读取某任务通过 `taskMessages` 事件缓存下来的消息 JSON。 */
-    fun busTaskMessages(taskId: String): String? {        val params = JSONObject().apply { put("taskId", taskId) }
+    fun busTaskMessages(taskId: String): String? {
+        val params = JSONObject().apply { put("taskId", taskId) }
         val raw = toNative(false, "busTaskMessages", params.toString(), null, true).toString()
         return runCatching { JSONObject(raw).optString("json") }
             .getOrNull()

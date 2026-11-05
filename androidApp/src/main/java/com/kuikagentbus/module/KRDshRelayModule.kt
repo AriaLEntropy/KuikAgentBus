@@ -4,12 +4,14 @@ import android.app.Activity
 import android.content.Intent
 import com.kuikagentbus.relay.ArtifactFetch
 import com.kuikagentbus.relay.AgentHostBus
+import com.kuikagentbus.relay.DshFileOpen
 import com.kuikagentbus.relay.DshQrScanActivity
 import com.kuikagentbus.relay.DshRelayManager
 import com.kuikagentbus.relay.DshRelayNativeState
 import com.tencent.kuikly.core.render.android.export.KuiklyRenderBaseModule
 import com.tencent.kuikly.core.render.android.export.KuiklyRenderCallback
 import org.json.JSONObject
+import java.io.File
 import kotlin.concurrent.thread
 
 internal class KRDshRelayModule : KuiklyRenderBaseModule() {
@@ -89,6 +91,18 @@ internal class KRDshRelayModule : KuiklyRenderBaseModule() {
                     }
                     activity?.runOnUiThread { callback?.invoke(payload) }
                 }
+            }
+            null
+        }
+        "busOpenFile" -> {
+            val args = runCatching { JSONObject(params ?: "{}") }.getOrNull()
+            val path = args?.optString("path").orEmpty()
+            val contentType = args?.optString("contentType").orEmpty()
+            val ctx = context
+            if (ctx == null) {
+                callback?.invoke(mapOf("state" to "failed", "reason" to "no_context"))
+            } else {
+                callback?.invoke(mapOf("state" to DshFileOpen.open(ctx, File(path), contentType)))
             }
             null
         }

@@ -7,4 +7,6 @@
     <external-files-path name="exports_ext" path="exports" />
     <!-- 拍照临时文件目录：cacheDir/camera -->
     <cache-path name="camera_photos" path="camera" />
+    <!-- 产物缓存：cacheDir/bus-artifacts，取回的文件要能交给系统应用打开 -->
+    <cache-path name="bus_artifacts" path="bus-artifacts" />
 </paths>

@@ -461,5 +461,48 @@ internal fun busChatArtifactNotice(states: List<BusChatArtifactState>): String =
         ?.label
         .orEmpty()
 
+/**
+ * 文件卡片的状态（FR-9.4）
+ *
+ * 卡片点下去之后连着做两件事：先让电脑把文件取回成产物（Fetching），
+ * 记录里出现 artifactId 之后再下字节（Downloading），最后交给系统应用打开
+ */
+internal enum class BusChatFileStatus { Idle, Fetching, Downloading, Failed }
+
+internal data class BusChatFileState(
+    val status: BusChatFileStatus,
+    /** 卡片第二行那句话；Idle 时为空，界面按「大小 · 文件」显示 */
+    val label: String = "",
+    /** 只进日志的技术原因 */
+    val reason: String = "",
+)
+
+internal const val BUS_CHAT_FILE_FETCHING = "正在从电脑获取"
+internal const val BUS_CHAT_FILE_DOWNLOADING = "正在下载到本机"
+internal const val BUS_CHAT_FILE_TIMEOUT = "获取超时，请稍后再试"
+internal const val BUS_CHAT_FILE_NO_HANDLER = "这台手机上没有能打开它的应用"
+
+/** 卡片状态的键：同一条消息里可能提到两个同名文件，所以带上消息 id */
+internal fun busChatFileKey(messageId: String, path: String): String = "$messageId|$path"
+
+/**
+ * 电脑回的拒绝串 → 卡片上那句
+ *
+ * 需求只改写「文件不在对话里」这一条，其余原样透传，别把电脑已经说清楚的信息吃掉。
+ * 用 contains 是因为宿主原文带着「这个」前缀
+ */
+internal fun busChatFileFailure(error: String): String = when {
+    error.isBlank() -> "获取失败"
+    error.contains("文件不在对话里") -> "下拉刷新记录后再试"
+    else -> error
+}
+
+/** 系统应用打开的结果串（原生层回的那几个 state）换成界面那句话 */
+internal fun busChatOpenFailure(state: String): String = when (state) {
+    "no_handler" -> BUS_CHAT_FILE_NO_HANDLER
+    "missing" -> "本机的文件已经不见了"
+    else -> "打开失败，请稍后再试"
+}
+
 private fun JsonObject.stringField(key: String): String =
     (this[key] as? JsonPrimitive)?.contentOrNull ?: ""

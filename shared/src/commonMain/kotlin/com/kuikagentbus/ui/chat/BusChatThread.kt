@@ -1,6 +1,7 @@
 package com.kuikagentbus.ui.chat
 
 import com.kuikagentbus.data.message.DshMessageAttachment
+import com.kuikagentbus.data.message.DshMessageFileRef
 import com.kuikagentbus.data.message.DshMessageRole
 import com.kuikagentbus.ui.home.BusApprovalQuestion
 import com.tencent.kuikly.core.base.Border
@@ -143,6 +144,8 @@ internal fun ViewContainer<*, *>.BusChatMessageRow(
     onToggleTools: () -> Unit,
     onSelectStep: (Int) -> Unit,
     artifactState: (DshMessageAttachment) -> BusChatArtifactState,
+    fileState: (DshMessageFileRef) -> BusChatFileState,
+    onOpenFile: (DshMessageFileRef) -> Unit,
 ) {
     val width = contentWidth.coerceAtLeast(0f)
     when (row) {
@@ -156,7 +159,15 @@ internal fun ViewContainer<*, *>.BusChatMessageRow(
                 artifactState,
             )
             DshMessageRole.TOOL -> BusChatToolRow(row, palette, expanded, onToggleTools, onSelectStep)
-            else -> BusChatAssistantBody(row.message.content, palette, width, streaming)
+            else -> BusChatAssistantBody(
+                row.message.content,
+                palette,
+                width,
+                streaming,
+                row.message.fileRefs,
+                fileState,
+                onOpenFile,
+            )
         }
     }
 }
@@ -303,12 +314,15 @@ private fun ViewContainer<*, *>.BusChatImageTile(
     }
 }
 
-/** 助手正文：按 [busChatBlocks] 的分块渲染，最后一块之后挂流式光标 */
+/** 助手正文：按 [busChatBlocks] 的分块渲染，最后一块之后挂流式光标，正文后跟文件卡片 */
 private fun ViewContainer<*, *>.BusChatAssistantBody(
     content: String,
     palette: BusChatPalette,
     contentWidth: Float,
     streaming: () -> Boolean,
+    files: List<DshMessageFileRef>,
+    fileState: (DshMessageFileRef) -> BusChatFileState,
+    onOpenFile: (DshMessageFileRef) -> Unit,
 ) {
     val blocks = busChatBlocks(content)
     View {
@@ -320,7 +334,7 @@ private fun ViewContainer<*, *>.BusChatAssistantBody(
             BusChatBlockView(
                 block = block,
                 first = index == 0,
-                last = index == blocks.lastIndex,
+                last = index == blocks.lastIndex && files.isEmpty(),
                 palette = palette,
             )
         }
@@ -335,6 +349,95 @@ private fun ViewContainer<*, *>.BusChatAssistantBody(
                     opacity(0.7f)
                     marginTop(busChatPx(2f))
                 }
+            }
+        }
+        if (files.isNotEmpty()) {
+            // FR-6.2：files 显示为文件卡片（名字、大小），点击的行为在 FR-9.4
+            View {
+                attr {
+                    flexDirectionColumn()
+                    marginTop(busChatPx(8f))
+                }
+                files.forEach { file ->
+                    BusChatFileCard(file, palette, fileState(file), contentWidth) { onOpenFile(file) }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 对话里的文件卡片
+ *
+ * 形状跟产物卡一致（r12、1px 发丝线），区别在第二行：没有进行中状态时显示大小，
+ * 正在取回/下载时换成那句状态话，失败时换成原因（FR-9.4 要求失败必须给出原因，
+ * 而且不能卡在加载中）
+ */
+private fun ViewContainer<*, *>.BusChatFileCard(
+    file: DshMessageFileRef,
+    palette: BusChatPalette,
+    state: BusChatFileState,
+    cardWidth: Float,
+    onClick: () -> Unit,
+) {
+    View {
+        attr {
+            flexDirectionRow()
+            alignItemsCenter()
+            width(cardWidth)
+            marginTop(busChatPx(6f))
+            backgroundColor(palette.surface)
+            border(Border(1f, BorderStyle.SOLID, palette.line))
+            borderRadius(busChatPx(12f))
+            paddingTop(busChatPx(8f))
+            paddingBottom(busChatPx(8f))
+            paddingLeft(busChatPx(10f))
+            paddingRight(busChatPx(10f))
+        }
+        event { click { onClick() } }
+        Image {
+            attr {
+                src(ImageUri.commonAssets("file-generic.svg"))
+                size(busChatPx(18f), busChatPx(18f))
+                tintColor(palette.deep)
+            }
+        }
+        View {
+            attr {
+                flex(1f)
+                flexDirectionColumn()
+                marginLeft(busChatPx(9f))
+            }
+            Text {
+                attr {
+                    text(file.name.ifBlank { "文件" })
+                    fontSize(BusChatTokens.toolTitle)
+                    fontWeightSemiBold()
+                    color(palette.ink)
+                    lines(1)
+                    textOverFlowTail()
+                }
+            }
+            Text {
+                attr {
+                    text(
+                        if (state.label.isBlank()) busChatArtifactMeta(file.size)
+                        else state.label,
+                    )
+                    fontSize(busChatPx(11f))
+                    color(palette.mut)
+                    lines(1)
+                    textOverFlowTail()
+                    marginTop(busChatPx(1f))
+                }
+            }
+        }
+        Image {
+            attr {
+                src(ImageUri.commonAssets("chevron-right.svg"))
+                size(busChatPx(14f), busChatPx(14f))
+                tintColor(palette.faint)
+                marginLeft(busChatPx(8f))
             }
         }
     }

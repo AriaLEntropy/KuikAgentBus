@@ -179,6 +179,23 @@ internal interface ConversationSource {
      * 这里只把原生回的三个字段翻译成界面状态
      */
     fun fetchArtifact(artifactId: String, contentType: String, onDone: (BusChatArtifactState) -> Unit)
+
+    /**
+     * FR-9.4：让电脑把对话里提到的一个本机文件取回成产物
+     *
+     * 电脑先重发带 artifactId 的 taskMessages、再回 ok，所以收到 ok 之后调用方
+     * 还要再看一次记录，才知道 id 到手了
+     */
+    fun fetchFile(
+        agentId: String,
+        taskId: String,
+        messageId: String,
+        path: String,
+        onDone: (ok: Boolean, error: String) -> Unit,
+    )
+
+    /** 把已经取回本机的文件交给系统应用打开；回原生层给的结果串 */
+    fun openFile(path: String, contentType: String, onDone: (String) -> Unit)
 }
 
 /**
@@ -652,6 +669,48 @@ internal class BusChatSource(
         relay.busFetchArtifact(artifactId, contentType) { result ->
             onDone(busChatArtifactState(result.state, result.path, result.reason))
         }
+    }
+
+    override fun fetchFile(
+        agentId: String,
+        taskId: String,
+        messageId: String,
+        path: String,
+        onDone: (ok: Boolean, error: String) -> Unit,
+    ) {
+        if (taskId.isBlank() || messageId.isBlank() || path.isBlank()) {
+            onDone(false, "缺少文件或消息 id")
+            return
+        }
+        sendCommand(
+            retryKey = listOf("fetchFile", taskId, messageId, path).joinToString("|"),
+            build = { id, createdAt ->
+                BusCommands.fetchFile(
+                    commandId = id,
+                    createdAt = createdAt,
+                    agentId = agentId,
+                    taskId = taskId,
+                    messageId = messageId,
+                    path = path,
+                )
+            },
+        ) { result ->
+            when (result) {
+                is BusSendResult.Confirmed -> {
+                    if (result.ok) onDone(true, "") else onDone(false, result.error.ifBlank { "获取失败" })
+                }
+                is BusSendResult.Failed -> onDone(false, operationFailure(result, "获取失败"))
+                else -> onDone(false, result.message)
+            }
+        }
+    }
+
+    override fun openFile(path: String, contentType: String, onDone: (String) -> Unit) {
+        if (path.isBlank()) {
+            onDone("missing")
+            return
+        }
+        relay.busOpenFile(path, contentType, onDone)
     }
 
     /**

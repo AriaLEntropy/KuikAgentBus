@@ -8,6 +8,7 @@ import com.kuikagentbus.protocol.busCanDeleteTask
 import com.kuikagentbus.data.connection.DshRelayModule
 import com.kuikagentbus.data.message.DshMessage
 import com.kuikagentbus.data.message.DshMessageAttachment
+import com.kuikagentbus.data.message.DshMessageFileRef
 import com.kuikagentbus.platform.currentTimeMillis
 import com.kuikagentbus.theme.DshColorTokens
 import com.kuikagentbus.ui.dshTopInset
@@ -166,6 +167,13 @@ internal class BusChatPage : BasePager() {
 
     /** 在途的 artifactId，防同一张图被连续重组请求多次 */
     private val artifactInFlight = mutableSetOf<String>()
+
+    /** FR-9.4：文件卡片的状态，键是 busChatFileKey(messageId, path) */
+    private var fileStates by observable<Map<String, BusChatFileState>>(emptyMap())
+
+    /** 等电脑重发记录的节奏：1.5 秒一次、最多 8 次，之后按超时收口，不让卡片卡在加载中 */
+    private val fileIdPollMs = 1_500
+    private val fileIdMaxAttempts = 8
 
     private var chatSource: ConversationSource? = null
     private var inputView: InputView? = null
@@ -625,6 +633,94 @@ internal class BusChatPage : BasePager() {
         }
     }
 
+    private fun fileStateOf(messageId: String, file: DshMessageFileRef): BusChatFileState =
+        fileStates[busChatFileKey(messageId, file.path)] ?: BusChatFileState(BusChatFileStatus.Idle)
+
+    /**
+     * 点文件卡片（FR-9.4）
+     *
+     * 已经有 artifactId 就按 FR-9.2 下载再打开；没有就先发 fetchFile，
+     * 电脑会先重发带 id 的 taskMessages 再回 ok，所以要再拉一次记录才接得上
+     */
+    private fun openFileCard(messageId: String, file: DshMessageFileRef) {
+        val key = busChatFileKey(messageId, file.path)
+        val current = fileStates[key]?.status
+        if (current == BusChatFileStatus.Fetching || current == BusChatFileStatus.Downloading) return
+        if (file.artifactId.isNotBlank()) {
+            downloadFileThenOpen(key, file.artifactId, file.contentType)
+            return
+        }
+        val source = chatSource ?: return
+        fileStates = fileStates + (key to BusChatFileState(BusChatFileStatus.Fetching, BUS_CHAT_FILE_FETCHING))
+        source.fetchFile(computerAgentId, taskId, messageId, file.path) { ok, error ->
+            if (!alive) return@fetchFile
+            if (!ok) {
+                fileStates = fileStates + (
+                    key to BusChatFileState(
+                        BusChatFileStatus.Failed,
+                        busChatFileFailure(error),
+                        error,
+                    )
+                    )
+                return@fetchFile
+            }
+            fetchMessages(force = true)
+            setTimeout(pagerId, fileIdPollMs) { waitForFileArtifactId(messageId, file.path, key, 1) }
+        }
+    }
+
+    private fun waitForFileArtifactId(messageId: String, path: String, key: String, attempt: Int) {
+        if (!alive) return
+        val file = fileRefOf(messageId, path)
+        if (file != null && file.artifactId.isNotBlank()) {
+            downloadFileThenOpen(key, file.artifactId, file.contentType)
+            return
+        }
+        if (attempt >= fileIdMaxAttempts) {
+            fileStates = fileStates + (
+                key to BusChatFileState(BusChatFileStatus.Failed, BUS_CHAT_FILE_TIMEOUT, "wait_id_timeout")
+                )
+            return
+        }
+        fetchMessages(force = true)
+        setTimeout(pagerId, fileIdPollMs) { waitForFileArtifactId(messageId, path, key, attempt + 1) }
+    }
+
+    private fun downloadFileThenOpen(key: String, artifactId: String, contentType: String) {
+        val source = chatSource ?: return
+        fileStates = fileStates + (
+            key to BusChatFileState(BusChatFileStatus.Downloading, BUS_CHAT_FILE_DOWNLOADING)
+            )
+        source.fetchArtifact(artifactId, contentType) { state ->
+            if (!alive) return@fetchArtifact
+            if (state.status != BusChatArtifactStatus.Ready) {
+                fileStates = fileStates + (
+                    key to BusChatFileState(
+                        BusChatFileStatus.Failed,
+                        state.label.ifBlank { BUS_CHAT_ARTIFACT_FAILED },
+                        state.reason,
+                    )
+                    )
+                return@fetchArtifact
+            }
+            source.openFile(state.path, contentType) { result ->
+                if (!alive) return@openFile
+                fileStates = fileStates + if (result == "opened") {
+                    key to BusChatFileState(BusChatFileStatus.Idle)
+                } else {
+                    key to BusChatFileState(BusChatFileStatus.Failed, busChatOpenFailure(result), result)
+                }
+            }
+        }
+    }
+
+    /** 记录重发之后，这条消息里那个文件现在长什么样（artifactId 可能刚被补上） */
+    private fun fileRefOf(messageId: String, path: String): DshMessageFileRef? {
+        val row = chatRows.firstOrNull { (it as? BusChatRow.Message)?.message?.id == messageId }
+            as? BusChatRow.Message ?: return null
+        return row.message.fileRefs.firstOrNull { it.path == path }
+    }
+
     /**
      * 点折叠行：在对话流里就地展开/收起步骤列表（稿子③的中间层）
      *
@@ -953,6 +1049,14 @@ internal class BusChatPage : BasePager() {
                                                     },
                                                     artifactState = { attachment ->
                                                         this@BusChatPage.artifactStateOf(attachment)
+                                                    },
+                                                    fileState = { file ->
+                                                        val message = (item.row as? BusChatRow.Message)?.message
+                                                        this@BusChatPage.fileStateOf(message?.id.orEmpty(), file)
+                                                    },
+                                                    onOpenFile = { file ->
+                                                        val message = (item.row as? BusChatRow.Message)?.message
+                                                        this@BusChatPage.openFileCard(message?.id.orEmpty(), file)
                                                     },
                                                 )
 

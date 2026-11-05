@@ -176,6 +176,32 @@ object BusCommands {
         })
     }.toString()
 
+    /**
+     * 取回对话里提到的一个本机文件（FR-9.4）
+     *
+     * 形状照上游样本 command-fetch-file.json：电脑读文件、存成产物，然后重发带
+     * artifactId 的 taskMessages。path 用消息里那条文件引用的原样值，电脑会校验
+     * 它确实在这条对话里、而且没跑出项目目录
+     */
+    fun fetchFile(
+        commandId: String,
+        createdAt: String,
+        agentId: String,
+        taskId: String,
+        messageId: String,
+        path: String,
+    ): String = buildJsonObject {
+        put("id", JsonPrimitive(commandId))
+        put("createdAt", JsonPrimitive(createdAt))
+        put("agentId", JsonPrimitive(agentId))
+        put("kind", JsonPrimitive("fetchFile"))
+        put("fetchFile", buildJsonObject {
+            put("taskId", JsonPrimitive(taskId))
+            put("messageId", JsonPrimitive(messageId))
+            put("path", JsonPrimitive(path))
+        })
+    }.toString()
+
     /** 协议 3.8：把项目从电脑端 BotBus 列表移出；不删除目录或会话记录。 */
     fun removeProject(
         commandId: String,
