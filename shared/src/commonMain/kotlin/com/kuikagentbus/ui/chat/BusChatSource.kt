@@ -448,6 +448,8 @@ internal class BusChatSource(
                 },
                 content = objectItem.string("text"),
                 toolName = if (role == "tool") "tool" else null,
+                attachments = busChatAttachments(objectItem["attachments"]),
+                fileRefs = busChatFileRefs(objectItem["files"]),
             )
         } ?: return null
         return BusChatHistory(
@@ -456,8 +458,7 @@ internal class BusChatSource(
         )
     }
 
-    override fun fetchMessages(agentId: String, taskId: String) {
-        if (taskId.isBlank()) return
+    override fun fetchMessages(agentId: String, taskId: String) {        if (taskId.isBlank()) return
         val commandId = BusCommands.newCommandId()
         val json = BusCommands.fetchMessages(
             commandId = commandId,

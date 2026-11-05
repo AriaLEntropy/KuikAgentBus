@@ -1,8 +1,10 @@
 package com.kuikagentbus.ui.chat
 
+import com.kuikagentbus.data.message.DshMessageAttachment
 import com.kuikagentbus.data.message.DshMessageRole
 import com.kuikagentbus.ui.home.BusApprovalQuestion
 import com.tencent.kuikly.core.base.Border
+import com.tencent.kuikly.core.layout.FlexWrap
 import com.tencent.kuikly.core.base.BorderRectRadius
 import com.tencent.kuikly.core.base.BorderStyle
 import com.tencent.kuikly.core.base.BoxShadow
@@ -145,7 +147,12 @@ internal fun ViewContainer<*, *>.BusChatMessageRow(
     when (row) {
         is BusChatRow.ToolGroup -> BusChatToolGroupRow(row, palette, expanded, onToggleTools, onSelectStep)
         is BusChatRow.Message -> when (row.message.role) {
-            DshMessageRole.USER -> BusChatUserBubble(row.message.content, palette, width)
+            DshMessageRole.USER -> BusChatUserBubble(
+                row.message.content,
+                busChatImageAttachments(row.message),
+                palette,
+                width,
+            )
             DshMessageRole.TOOL -> BusChatToolRow(row, palette, expanded, onToggleTools, onSelectStep)
             else -> BusChatAssistantBody(row.message.content, palette, width, streaming)
         }
@@ -160,6 +167,7 @@ internal fun ViewContainer<*, *>.BusChatMessageRow(
  */
 private fun ViewContainer<*, *>.BusChatUserBubble(
     content: String,
+    images: List<DshMessageAttachment>,
     palette: BusChatPalette,
     contentWidth: Float,
 ) {
@@ -185,16 +193,20 @@ private fun ViewContainer<*, *>.BusChatUserBubble(
             paddingLeft(BusChatTokens.bubblePaddingH)
             paddingRight(BusChatTokens.bubblePaddingH)
         }
-        if (body.isEmpty()) {
-            // 只发了图片时正文为空，气泡仍要出现，用「图片」占位顶住一行高度
-            Text {
+        if (images.isNotEmpty()) {
+            // 缩略图排在正文上方，一行排不下就换行；协议 FR-9.1 一条消息最多 4 张
+            View {
                 attr {
-                    text("图片")
-                    fontSize(busChatPx(14f))
-                    color(palette.faint)
+                    flexDirectionRow()
+                    flexWrap(FlexWrap.WRAP)
+                    marginBottom(if (body.isEmpty()) 0f else busChatPx(6f))
+                }
+                images.take(BUS_CHAT_MAX_IMAGES).forEach { attachment ->
+                    BusChatImageTile(attachment, palette)
                 }
             }
-        } else {
+        }
+        if (body.isNotEmpty()) {
             Text {
                 attr {
                     text(body)
@@ -208,6 +220,55 @@ private fun ViewContainer<*, *>.BusChatUserBubble(
                     )
                     lines(Int.MAX_VALUE)
                 }
+            }
+        } else if (images.isEmpty()) {
+            // 空正文且附件还没解析出来：FR-6.3 的「图片」占位。
+            // 同一条消息后来带上 attachments 时整条被新的 taskMessages 覆盖，
+            // 这里走上面那条分支，原位换成缩略图，不新增一行
+            Text {
+                attr {
+                    text("图片")
+                    fontSize(busChatPx(14f))
+                    color(palette.faint)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 一条随文图片的缩略图位置
+ *
+ * 字节还没取回来（FR-9.2 的下载与缓存还没接），所以先是一块按附件宽高比留出来的灰块；
+ * 附件没给宽高就按 1:1，比例限制在 0.55~1.8 之间，避免长截图把气泡撑成一列
+ */
+private fun ViewContainer<*, *>.BusChatImageTile(
+    attachment: DshMessageAttachment,
+    palette: BusChatPalette,
+) {
+    val ratio = if (attachment.width > 0 && attachment.height > 0) {
+        attachment.height.toFloat() / attachment.width.toFloat()
+    } else {
+        1f
+    }
+    val heightDesign = (BUS_CHAT_IMAGE_SIDE * ratio).coerceIn(52f, 172f)
+    View {
+        attr {
+            width(busChatPx(BUS_CHAT_IMAGE_SIDE))
+            height(busChatPx(heightDesign))
+            marginRight(busChatPx(6f))
+            marginBottom(busChatPx(6f))
+            borderRadius(busChatPx(10f))
+            backgroundColor(palette.chip)
+            border(Border(1f, BorderStyle.SOLID, palette.surfaceBorder))
+            justifyContentCenter()
+            alignItemsCenter()
+        }
+        Text {
+            attr {
+                text("图片")
+                fontSize(busChatPx(12f))
+                color(palette.mut)
             }
         }
     }

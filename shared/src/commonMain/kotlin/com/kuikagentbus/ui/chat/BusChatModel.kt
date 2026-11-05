@@ -1,6 +1,13 @@
 package com.kuikagentbus.ui.chat
 
 import com.kuikagentbus.data.message.DshMessage
+import com.kuikagentbus.data.message.DshMessageAttachment
+import com.kuikagentbus.data.message.DshMessageFileRef
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 
 /**
  * 对话页的纯逻辑：模型芯片文案、工具摘要、正文分块、审批标题
@@ -332,3 +339,71 @@ internal object BusChatLocalHidden {
 
     fun isHidden(taskId: String): Boolean = taskId.isNotBlank() && taskId in ids
 }
+
+/**
+ * Message.attachments 的解析
+ *
+ * 形状照宿主契约样本 event-task-messages-with-attachments.json：
+ * `[{ artifactId, contentType, size, width?, height? }]`。
+ * 单件字段坏了就丢这一件（协议规定按「不可用」显示），不能因为一项拒收整条消息
+ */
+internal fun busChatAttachments(element: JsonElement?): List<DshMessageAttachment> {
+    val array = element as? JsonArray ?: return emptyList()
+    return array.mapNotNull { item ->
+        val obj = item as? JsonObject ?: return@mapNotNull null
+        val artifactId = obj.stringField("artifactId")
+        if (artifactId.isBlank()) return@mapNotNull null
+        DshMessageAttachment(
+            artifactId = artifactId,
+            contentType = obj.stringField("contentType"),
+            size = obj.stringField("size").toLongOrNull() ?: 0L,
+            width = obj.stringField("width").toIntOrNull() ?: 0,
+            height = obj.stringField("height").toIntOrNull() ?: 0,
+        )
+    }
+}
+
+/**
+ * Message.files 的解析：电脑上的文件引用，可能还没有 artifactId
+ *
+ * 没有 id 的那批要走 FR-9.4：点击先发 fetchFile，等新的 taskMessages 带上 id 再下载
+ */
+internal fun busChatFileRefs(element: JsonElement?): List<DshMessageFileRef> {
+    val array = element as? JsonArray ?: return emptyList()
+    return array.mapNotNull { item ->
+        val obj = item as? JsonObject ?: return@mapNotNull null
+        val name = obj.stringField("name")
+        val path = obj.stringField("path")
+        if (name.isBlank() && path.isBlank()) return@mapNotNull null
+        DshMessageFileRef(
+            path = path,
+            name = name.ifBlank { path.substringAfterLast('/') },
+            contentType = obj.stringField("contentType"),
+            size = obj.stringField("size").toLongOrNull() ?: 0L,
+            artifactId = obj.stringField("artifactId"),
+        )
+    }
+}
+
+/** 一条消息最多显示几张缩略图（FR-9.1 发送上限也是 4，超出的按协议不会来） */
+internal const val BUS_CHAT_MAX_IMAGES = 4
+
+/** 缩略图的设计宽度，高度按附件给的宽高比换算 */
+internal const val BUS_CHAT_IMAGE_SIDE = 96f
+
+/** 图片附件：按 contentType 判，协议里图片才有宽高 */
+internal fun busChatImageAttachments(message: DshMessage): List<DshMessageAttachment> =
+    message.attachments.filter { it.contentType.startsWith("image/") }
+
+/**
+ * 气泡要不要写「图片」占位
+ *
+ * FR-6.3 的口径：空正文且附件还没解析出来时才占位。
+ * 同一条消息后来带上 attachments 时，整条消息会被新的 taskMessages 覆盖，
+ * 这里返回 false，原位换成缩略图，不新增一行
+ */
+internal fun busChatNeedsImagePlaceholder(message: DshMessage): Boolean =
+    message.content.isBlank() && message.attachments.isEmpty()
+
+private fun JsonObject.stringField(key: String): String =
+    (this[key] as? JsonPrimitive)?.contentOrNull ?: ""

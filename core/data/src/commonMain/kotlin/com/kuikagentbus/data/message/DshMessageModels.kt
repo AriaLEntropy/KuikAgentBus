@@ -32,6 +32,34 @@ enum class DshMessageRole {
     ERROR,
 }
 
+/**
+ * 消息随文图片附件（协议 2.3 Message.attachments 项）。
+ *
+ * 字节不在这里：只有 artifactId，取字节走产物下载接口，见 FR-9.2。
+ * width/height 电脑可能不给（协议里是可选），拿不到就按默认方形比例画。
+ */
+data class DshMessageAttachment(
+    val artifactId: String,
+    val contentType: String,
+    val size: Long,
+    val width: Int = 0,
+    val height: Int = 0,
+)
+
+/**
+ * 消息里提到的电脑上的文件（协议 2.3 Message.files 项）。
+ *
+ * artifactId 为空时说明电脑还没把它暂存成产物，点击要先发 fetchFile，
+ * 等新的 taskMessages 带上 id 再下载，见 FR-9.4。
+ */
+data class DshMessageFileRef(
+    val path: String,
+    val name: String,
+    val contentType: String,
+    val size: Long,
+    val artifactId: String = "",
+)
+
 data class DshMessage(
     val id: String,
     val role: DshMessageRole,
@@ -55,6 +83,10 @@ data class DshMessage(
     val isReasoning: Boolean = false,
     val attachmentId: String? = null,
     val attachmentIds: List<String> = emptyList(),
+    /** 协议随文图片附件，带类型与尺寸；DSH 那条链不填，保持空 */
+    val attachments: List<DshMessageAttachment> = emptyList(),
+    /** 协议里消息提到的电脑文件，可能还没有 artifactId */
+    val fileRefs: List<DshMessageFileRef> = emptyList(),
     val toolCallId: String = "",
     /**
      * 用户消息随文发送的图片本地预览（dataUrl）。
