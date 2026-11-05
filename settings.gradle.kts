@@ -29,8 +29,8 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "KuikAgentBus"
-include(":core-platform")
-include(":core-log")
-include(":core-data")
+include(":core:platform")
+include(":core:log")
+include(":core:data")
 include(":androidApp")
 include(":shared")

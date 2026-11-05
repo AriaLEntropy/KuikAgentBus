@@ -79,7 +79,8 @@ tasks.register("checkLayering") {
     description = "校验包分层：数据/领域层不得依赖 UI，组件层不得依赖页面层；并自证门有效。"
 
     val sources = fileTree(".") {
-        include("*/src/**/*.kt")
+        // 模块可以是扁平（shared/）或嵌套（core/data/），只写 */src/** 会静默漏掉嵌套的那批
+        include("*/src/**/*.kt", "*/*/src/**/*.kt")
         exclude("**/build/**")
         exclude("**/.gradle/**")
         exclude("**/oh_modules/**")
@@ -91,6 +92,22 @@ tasks.register("checkLayering") {
     doLast {
         val real = sources.files
         val (violations, importCount, pagePkgs) = layeringScan(real)
+
+        // 盲区检测：凡是带 src 的模块目录，一个 .kt 都没被扫到就说明门瞎了（上一版就是
+        // 模块改成 core/data 嵌套后，*/src/** 静默少扫 69 个文件还照打 OK）
+        val scannedDirs = real.map { it.path.replace('\\', '/') }.toSet()
+        val blind = mutableListOf<String>()
+        projectDir.walkTopDown().maxDepth(3).filter { it.isDirectory && it.name == "src" }.forEach { srcDir ->
+            val hasKt = srcDir.walkTopDown().any { it.isFile && it.extension == "kt" }
+            val covered = scannedDirs.any { it.startsWith(srcDir.path.replace('\\', '/')) }
+            if (hasKt && !covered) blind += srcDir.path.replace('\\', '/')
+        }
+        if (blind.isNotEmpty()) {
+            throw GradleException(
+                "checkLayering 有盲区：这些源码目录里有 .kt 但一个都没被扫到：\n  " +
+                    blind.joinToString("\n  ") + "\n多半是 include 模式没覆盖新的模块层级。"
+            )
+        }
 
         logger.lifecycle(
             "checkLayering: scanned=${real.size} imports=$importCount " +

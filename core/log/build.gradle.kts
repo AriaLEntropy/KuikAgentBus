@@ -23,7 +23,7 @@ kotlin {
     sourceSets {
         val commonMain by getting {
             dependencies {
-                api(project(":core-platform"))
+                api(project(":core:platform"))
                 implementation("com.tencent.kuikly-open:core:${Version.getKuiklyVersion()}")
                 api("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.1")
             }
