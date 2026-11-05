@@ -34,7 +34,7 @@ buildscript {
 //   2. 通过时打印扫描文件数 / import 条数 / 页面包数，ASCII 一行，管道里也能 grep。
 //   3. 每次运行往 build/ 植一个假违规（不在 src 下、不参与编译），确认门真抓得到再删掉。
 // ---------------------------------------------------------------------------
-val layeringRoot = "com.example.dsh"
+val layeringRoot = "com.kuikagentbus"
 val componentPkg = "$layeringRoot.ui.rendering"
 
 fun layeringScan(files: Set<java.io.File>): Triple<List<String>, Int, Set<String>> {

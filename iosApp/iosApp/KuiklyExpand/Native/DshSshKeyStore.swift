@@ -7,7 +7,7 @@ import UIKit
 final class DshSshKeyStore: NSObject, UIDocumentPickerDelegate {
     @objc static let shared = DshSshKeyStore()
 
-    private let service = "com.example.dsh.ssh-keys"
+    private let service = "com.kuikagentbus.ssh-keys"
     private var pickerCompletion: ((String) -> Void)?
     private var picker: UIDocumentPickerViewController?
 

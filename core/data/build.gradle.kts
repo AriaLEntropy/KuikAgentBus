@@ -76,7 +76,7 @@ kotlin {
 }
 
 android {
-    namespace = "com.example.dsh.coredata"
+    namespace = "com.kuikagentbus.core.data"
     compileSdk = 34
     defaultConfig {
         minSdk = 21

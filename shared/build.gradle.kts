@@ -126,7 +126,7 @@ kotlin {
     }
 }
 
-group = "com.example.dsh"
+group = "com.kuikagentbus"
 version = System.getenv("kuiklyBizVersion") ?: "1.0.0"
 
 publishing {
@@ -156,7 +156,7 @@ dependencies {
 }
 
 android {
-    namespace = "com.example.dsh.shared"
+    namespace = "com.kuikagentbus.shared"
     compileSdk = 34
     defaultConfig {
         minSdk = 21

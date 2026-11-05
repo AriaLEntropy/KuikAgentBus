@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.dsh"
+    namespace = "com.kuikagentbus"
     compileSdk = 34
     buildFeatures {
         buildConfig = true
@@ -21,7 +21,7 @@ android {
         }
     }
     defaultConfig {
-        applicationId = "com.example.kuikagentbus"
+        applicationId = "com.kuikagentbus"
         minSdk = 24
         targetSdk = 28
         versionCode = 5

@@ -26,7 +26,7 @@ kotlin {
 }
 
 android {
-    namespace = "com.example.dsh.coreplatform"
+    namespace = "com.kuikagentbus.core.platform"
     compileSdk = 34
     defaultConfig {
         minSdk = 21

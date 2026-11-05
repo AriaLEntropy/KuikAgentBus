@@ -1,0 +1,198 @@
+package com.kuikagentbus.data.message
+
+import com.kuikagentbus.data.message.DshContextCatalogEntry
+import com.kuikagentbus.data.message.DshContextInstruction
+import com.kuikagentbus.data.message.DshContextRecall
+import com.kuikagentbus.data.message.DshContextSection
+import com.kuikagentbus.data.session.DshGoalSnapshot
+import com.kuikagentbus.data.message.DshMessage
+import com.kuikagentbus.data.interaction.DshPendingQuestion
+import com.kuikagentbus.data.interaction.DshQuestionDraft
+import com.kuikagentbus.data.tool.DshRemoteToolCallModel
+import com.kuikagentbus.data.tool.DshRemoteToolKind
+import com.kuikagentbus.data.session.DshSkill
+import com.kuikagentbus.data.models.DshToolCardType
+import com.tencent.kuikly.core.nvi.serialization.json.JSONArray
+import com.tencent.kuikly.core.nvi.serialization.json.JSONObject
+
+/**
+ * 技能建议：按斜杠前缀（首个空格之前）做**大小写敏感**的前缀匹配。
+ * 空前缀返回全部，供刚输入单独 "/" 时展示技能组。
+ *
+ * 对齐后端：web 技能源（`packages/client/ui-skill/src/client/index.ts`）使用
+ * `skill.name.startsWith(query)`（不做 lowercase）。移动端原先用 `lowercase().startsWith`
+ * 属于与命令源混淆，这里改为大小写敏感以与后端技能行为一致。
+ */
+fun dshSkillsMatching(source: List<DshSkill>, query: String): List<DshSkill> {
+    if (query.isEmpty()) return source.toList()
+    return source.filter { it.name.startsWith(query) }
+}
+
+fun isRemoteCatalogInvalidationEvent(event: String): Boolean = event in setOf(
+    "commands/change",
+    "skills/change",
+    "agent-preset/selected",
+    "settings/document-updated",
+    "credentials/updated",
+    "llm/adapters-updated",
+)
+
+fun parseGoalProjection(raw: String): DshGoalSnapshot? {
+    val root = runCatching { JSONObject(raw) }.getOrNull() ?: return null
+    val goal = root.optJSONObject("goal") ?: return null
+    val id = goal.optString("id")
+    val revision = goal.optInt("revision")
+    val objective = goal.optString("objective")
+    val phase = goal.optString("phase")
+    if (id.isEmpty() || revision <= 0 || objective.isEmpty() || phase.isEmpty() || phase == "complete") return null
+    return DshGoalSnapshot(
+        id = id,
+        revision = revision,
+        objective = objective,
+        phase = phase,
+        blockedReason = goal.optJSONObject("blockedReason")?.optString("message").orEmpty(),
+    )
+}
+
+/**
+ * 解析 `plan` 会话投影（`{ active, pending }`），对齐后端
+ * `packages/plan/plan-mode/src/index.ts` 的 projection view：`active` 是已提交的 plan 模式，
+ * `pending` 表示选择尚未在下一步前落地。解析失败返回 `(false, false)`。
+ */
+fun parsePlanProjection(raw: String): Pair<Boolean, Boolean> {
+    val root = runCatching { JSONObject(raw) }.getOrNull() ?: return false to false
+    return root.optBoolean("active") to root.optBoolean("pending")
+}
+
+fun DshToolCardType.iconAsset(): String = when (this) {
+    DshToolCardType.TERMINAL -> "tool-terminal.svg"
+    DshToolCardType.READ -> "tool-read.svg"
+    DshToolCardType.DIFF -> "tool-diff.svg"
+    DshToolCardType.SEARCH -> "tool-search.svg"
+    DshToolCardType.WEB -> "tool-web.svg"
+    DshToolCardType.JSON -> "tool-json.svg"
+    DshToolCardType.GENERIC -> "tool-generic.svg"
+}
+
+/** Remote tool-name semantics choose the icon even before a result view exists. */
+fun DshRemoteToolCallModel.iconAsset(): String = when (kind) {
+    DshRemoteToolKind.BASH -> "tool-terminal.svg"
+    DshRemoteToolKind.READ -> "tool-read.svg"
+    DshRemoteToolKind.FILE_MUTATION -> "tool-diff.svg"
+    DshRemoteToolKind.SEARCH -> "tool-search.svg"
+    DshRemoteToolKind.WEB -> "tool-web.svg"
+    DshRemoteToolKind.SKILL -> "tool-skill.svg"
+    DshRemoteToolKind.ASK_QUESTION -> "tool-ask.svg"
+    DshRemoteToolKind.TODO,
+    DshRemoteToolKind.GENERIC -> cardType.iconAsset()
+}
+
+fun String.dshLooksLikeJson(): Boolean {
+    val value = trimStart()
+    return value.startsWith("{") || value.startsWith("[")
+}
+
+fun String.dshReasoningSummary(running: Boolean): String {
+    val visible = trimEnd()
+    val newline = indexOf('\n')
+    if (running) {
+        val lastNewline = visible.lastIndexOf('\n')
+        return if (lastNewline < 0) visible else visible.substring(lastNewline + 1)
+    }
+    return if (newline < 0) visible else substring(0, newline)
+}
+
+fun contextCatalogEntries(source: JSONObject?): List<DshContextCatalogEntry> {
+    if (source?.optString("form") != "catalog") return emptyList()
+    val entries = source.optJSONArray("entries") ?: return emptyList()
+    val result = mutableListOf<DshContextCatalogEntry>()
+    for (index in 0 until entries.length()) {
+        val entry = entries.optJSONObject(index) ?: continue
+        val name = entry.optString("name")
+        if (name.isEmpty()) return emptyList()
+        result += DshContextCatalogEntry(name, entry.optString("description"))
+    }
+    return result.take(200)
+}
+
+fun contextSections(source: JSONObject?): List<DshContextSection> {
+    if (source?.optString("form") != "snapshot") return emptyList()
+    val sections = source.optJSONArray("sections") ?: return emptyList()
+    val result = mutableListOf<DshContextSection>()
+    for (index in 0 until sections.length()) {
+        val section = sections.optJSONObject(index) ?: continue
+        val name = section.optString("name")
+        if (name.isEmpty()) return emptyList()
+        result += DshContextSection(name, section.optString("text"))
+    }
+    return result
+}
+
+fun contextRecalls(source: JSONObject?): List<DshContextRecall> {
+    if (source?.optString("form") != "recall") return emptyList()
+    val references = source.optJSONArray("references") ?: return emptyList()
+    val result = mutableListOf<DshContextRecall>()
+    for (index in 0 until references.length()) {
+        val reference = references.optJSONObject(index) ?: continue
+        val label = reference.optString("label")
+        if (label.isEmpty()) return emptyList()
+        result += DshContextRecall(
+            label = label,
+            retainedMessages = reference.optInt("retainedMessages"),
+            omittedMessages = reference.optInt("omittedMessages"),
+            truncated = reference.optBoolean("truncated"),
+        )
+    }
+    return result
+}
+
+fun contextInstructions(source: JSONObject?): List<DshContextInstruction> {
+    if (source?.optString("form") != "instructions") return emptyList()
+    val changes = source.optJSONArray("changes") ?: return emptyList()
+    val result = mutableListOf<DshContextInstruction>()
+    for (index in 0 until changes.length()) {
+        val change = changes.optJSONObject(index) ?: continue
+        val path = change.optString("path")
+        val action = change.optString("action")
+        if (path.isEmpty() || (action != "set" && action != "replace" && action != "remove")) return emptyList()
+        result += DshContextInstruction(path, action)
+    }
+    return result
+}
+
+fun contextRelaySender(source: JSONObject?): String {
+    if (source?.optString("form") != "relay") return ""
+    return source.optString("senderSessionId").takeIf { it.isNotEmpty() } ?: ""
+}
+
+fun boundedContextText(text: String): String {
+    if (text.length <= 20_000) return text
+    return text.take(20_000) + "\n… 共 ${text.length} 字符"
+}
+
+fun buildQuestionAnswer(
+    question: DshPendingQuestion,
+    drafts: Map<Int, DshQuestionDraft>,
+): JSONObject {
+    return JSONObject().apply {
+        put("answers", JSONArray().apply {
+            question.questions.forEachIndexed { index, item ->
+                val draft = drafts[index] ?: DshQuestionDraft()
+                put(JSONObject().apply {
+                    put("id", item.id)
+                    put("selected", JSONArray().apply { draft.selected.forEach(::put) })
+                    if (!draft.skipped && draft.custom.isNotBlank()) put("custom", draft.custom.trim())
+                })
+            }
+        })
+    }
+}
+
+fun DshMessage.contextCanExpand(): Boolean {
+    return content.isNotEmpty() ||
+        contextCatalog.isNotEmpty() ||
+        contextSections.isNotEmpty() ||
+        contextRecalls.isNotEmpty() ||
+        contextInstructions.isNotEmpty() ||
+        contextRelaySender.isNotEmpty()
+}

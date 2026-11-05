@@ -3,7 +3,7 @@ import Security
 
 @objc(DshRelaySecrets)
 final class DshRelaySecrets: NSObject {
-    private let service = "com.example.dsh.relay-secrets"
+    private let service = "com.kuikagentbus.relay-secrets"
 
     @objc func save(
         masterKeyB64: String,

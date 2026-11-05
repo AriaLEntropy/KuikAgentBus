@@ -49,7 +49,7 @@ kotlin {
 }
 
 android {
-    namespace = "com.example.dsh.corelog"
+    namespace = "com.kuikagentbus.core.log"
     compileSdk = 34
     defaultConfig {
         minSdk = 21
