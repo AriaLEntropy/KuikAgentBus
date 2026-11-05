@@ -504,5 +504,29 @@ internal fun busChatOpenFailure(state: String): String = when (state) {
     else -> "打开失败，请稍后再试"
 }
 
+/**
+ * 产物列表的口径（FR-9.3）
+ *
+ * 电脑给的顺序就是新的在前，手机不再排；preview 是电脑上那个临时预览端口，
+ * 手机上没有能看的东西，整条不显示
+ */
+internal fun busChatListableArtifacts(all: List<BusChatArtifact>): List<BusChatArtifact> =
+    all.filter { it.kind != "preview" }
+
+/** 字段坏掉的那件产物显示这句话，其他件照常 */
+internal const val BUS_CHAT_ARTIFACT_UNAVAILABLE = "不可用"
+
+/**
+ * 这件产物在手机上到底能不能用
+ *
+ * 按类型要的最小字段判：链接没有 url 就没什么可打开的，图片/文件/视频没有 id
+ * 就取不到字节；认不出的 kind 不猜它该怎么打开，一并算不可用
+ */
+internal fun busChatArtifactUsable(artifact: BusChatArtifact): Boolean = when (artifact.kind) {
+    "link" -> artifact.url.isNotBlank()
+    "image", "file", "video" -> artifact.id.isNotBlank()
+    else -> false
+}
+
 private fun JsonObject.stringField(key: String): String =
     (this[key] as? JsonPrimitive)?.contentOrNull ?: ""

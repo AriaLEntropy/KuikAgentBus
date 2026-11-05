@@ -1068,6 +1068,7 @@ internal fun ViewContainer<*, *>.BusChatArtifactCard(
     artifact: BusChatArtifact,
     onClick: () -> Unit,
 ) {
+    val usable = busChatArtifactUsable(artifact)
     View {
         attr {
             flexDirectionRow()
@@ -1096,7 +1097,8 @@ internal fun ViewContainer<*, *>.BusChatArtifactCard(
             }
             Text {
                 attr {
-                    text(artifact.title.ifBlank { "产物" })
+                    // 字段坏掉的那件不猜它是什么，只报不可用，别的产物照常显示
+                    text(if (usable) artifact.title.ifBlank { "产物" } else BUS_CHAT_ARTIFACT_UNAVAILABLE)
                     fontSize(BusChatTokens.toolTitle)
                     fontWeightSemiBold()
                     color(palette.ink)

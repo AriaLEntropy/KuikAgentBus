@@ -229,7 +229,8 @@ internal class BusChatPage : BasePager() {
         workspaces.addAll(source.workspaces())
         if (taskId.isNotEmpty()) {
             artifacts.clear()
-            artifacts.addAll(source.artifacts(taskId))
+            // FR-9.3：preview 不进列表，菜单里那句计数也跟着只数能看的
+            artifacts.addAll(busChatListableArtifacts(source.artifacts(taskId)))
         }
         if (taskId.isNotEmpty()) {
             loading = true
@@ -1081,7 +1082,10 @@ internal class BusChatPage : BasePager() {
                                                     palette = palette,
                                                     artifact = item.artifact,
                                                     onClick = {
-                                                        this@BusChatPage.showToast("产物在电脑上查看")
+                                                        // 不可用的那件只剩一个标签，点了没有下一步
+                                                        if (busChatArtifactUsable(item.artifact)) {
+                                                            this@BusChatPage.showToast("产物在电脑上查看")
+                                                        }
                                                     },
                                                 )
                                             }
