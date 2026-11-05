@@ -18,70 +18,121 @@ buildscript {
 // 架构分层校验（fitness function）
 //
 // 分层（按包）：
-//   UI 页面层   com.example.dsh.ui.<feature>   home / chat / session / settings / ...
-//   UI 组件层   com.example.dsh.ui.rendering
-//   数据/领域层 com.example.dsh.<domain>        host / storage / session / message / ...
+//   UI 页面层   <root>.ui.<feature>     home / chat / connection / ...
+//   UI 组件层   <root>.ui.rendering
+//   数据/领域层 <root>.<domain>         bus / storage / message / ...
 //
 // 规则：
-//   R1 数据/领域层不得依赖 UI 层（com.example.dsh.ui.*）。
-//   R2 UI 组件层（ui.rendering）不得依赖 UI 页面层，否则无法孵化通用组件。
+//   R1 数据/领域层不得依赖 UI 层（<root>.ui.*）。
+//   R2 UI 组件层不得依赖页面层，否则通用组件孵化不出来。
 //
-// 依赖方向应为：数据/领域 ← 组件 ← 页面。
-// 跑法：./gradlew checkLayering
+// 依赖方向应为：数据/领域 ← 组件 ← 页面。跑法：./gradlew checkLayering
+//
+// 三条防自欺设计（上一版三条都缺）：
+//   1. 页面包清单不再手写，直接从源码 package 行推导。旧版手写了 13 个包，
+//      其中 10 个在本仓库根本不存在，R2 等于静默不判。
+//   2. 通过时打印扫描文件数 / import 条数 / 页面包数，ASCII 一行，管道里也能 grep。
+//   3. 每次运行往 build/ 植一个假违规（不在 src 下、不参与编译），确认门真抓得到再删掉。
 // ---------------------------------------------------------------------------
-val dshUiPagePrefixes = listOf(
-    "com.example.dsh.ui.home",
-    "com.example.dsh.ui.connection",
-    "com.example.dsh.ui.log",
-    "com.example.dsh.ui.models",
-    "com.example.dsh.ui.plugin",
-    "com.example.dsh.ui.settings",
-    "com.example.dsh.ui.search",
-    "com.example.dsh.ui.session",
-    "com.example.dsh.ui.dev",
-    "com.example.dsh.ui.web",
-    "com.example.dsh.ui.export",
-    "com.example.dsh.ui.interaction",
-    "com.example.dsh.ui.voice",
-)
+val layeringRoot = "com.example.dsh"
+val componentPkg = "$layeringRoot.ui.rendering"
+
+fun layeringScan(files: Set<java.io.File>): Triple<List<String>, Int, Set<String>> {
+    val violations = mutableListOf<String>()
+    val pagePkgs = sortedSetOf<String>()
+    val pkgOf = mutableMapOf<java.io.File, String>()
+    val importsOf = mutableMapOf<java.io.File, List<String>>()
+    var importCount = 0
+
+    files.sortedBy { it.path }.forEach { file ->
+        val lines = file.readLines()
+        val pkg = lines.firstNotNullOfOrNull { Regex("^package\\s+([\\w.]+)").find(it)?.groupValues?.get(1) }
+            ?: return@forEach
+        pkgOf[file] = pkg
+        val imps = lines.mapNotNull { Regex("^import\\s+([\\w.]+)").find(it)?.groupValues?.get(1) }
+        importsOf[file] = imps
+        importCount += imps.size
+        if (pkg.startsWith("$layeringRoot.ui.") && pkg != componentPkg) pagePkgs.add(pkg)
+    }
+
+    val prefix = projectDir.path.replace('\\', '/') + "/"
+    files.sortedBy { it.path }.forEach { file ->
+        val pkg = pkgOf[file] ?: return@forEach
+        val isUi = pkg.startsWith("$layeringRoot.ui.")
+        val isComponent = pkg == componentPkg
+        val rel = file.path.replace('\\', '/').removePrefix(prefix)
+        importsOf[file]?.forEachIndexed { index, imp ->
+            if (!imp.startsWith("$layeringRoot.")) return@forEachIndexed
+            if (!isUi && imp.startsWith("$layeringRoot.ui.")) {
+                violations += "R1  $rel:${index + 1}  数据/领域层 -> UI：$imp"
+            }
+            if (isComponent && pagePkgs.any { imp == it || imp.startsWith("$it.") }) {
+                violations += "R2  $rel:${index + 1}  组件层 -> 页面层：$imp"
+            }
+        }
+    }
+    return Triple(violations, importCount, pagePkgs)
+}
 
 tasks.register("checkLayering") {
     group = "verification"
-    description = "校验包分层：数据/领域层不得依赖 UI，组件层不得依赖页面层。"
+    description = "校验包分层：数据/领域层不得依赖 UI，组件层不得依赖页面层；并自证门有效。"
 
-    val dshSources = fileTree(".") {
+    val sources = fileTree(".") {
         include("*/src/**/*.kt")
         exclude("**/build/**")
         exclude("**/.gradle/**")
         exclude("**/oh_modules/**")
         exclude("**/*Test*/**")
     }
-    inputs.files(dshSources).withPropertyName("dshSources")
+    inputs.files(sources).withPropertyName("sources")
     outputs.upToDateWhen { false }
 
     doLast {
-        val rootDir = layout.projectDirectory.asFile
-        val violations = mutableListOf<String>()
-        dshSources.files.sortedBy { it.path }.forEach { file ->
-            val lines = file.readLines()
-            val pkg = lines.firstNotNullOfOrNull { line ->
-                Regex("^package\\s+([\\w.]+)").find(line)?.groupValues?.get(1)
-            } ?: return@forEach
-            val isUi = pkg.startsWith("com.example.dsh.ui.")
-            val isComponent = pkg.startsWith("com.example.dsh.ui.rendering")
-            val rel = file.relativeTo(rootDir).path.replace('\\', '/')
-            lines.forEachIndexed { index, line ->
-                val imp = Regex("^import\\s+([\\w.]+)").find(line)?.groupValues?.get(1)
-                    ?: return@forEachIndexed
-                if (!imp.startsWith("com.example.dsh.")) return@forEachIndexed
-                if (!isUi && imp.startsWith("com.example.dsh.ui.")) {
-                    violations += "R1  $rel:${index + 1}  数据/领域层 -> UI：$imp"
-                }
-                if (isComponent && dshUiPagePrefixes.any { imp == it || imp.startsWith("$it.") }) {
-                    violations += "R2  $rel:${index + 1}  组件层 -> 页面层：$imp"
-                }
-            }
+        val real = sources.files
+        val (violations, importCount, pagePkgs) = layeringScan(real)
+
+        logger.lifecycle(
+            "checkLayering: scanned=${real.size} imports=$importCount " +
+                "pagePackages=${pagePkgs.size} violations=${violations.size}"
+        )
+        logger.lifecycle("推导出的页面包：" + pagePkgs.joinToString())
+
+        // 门不能先瞎掉：一个页面包都没推出来，说明包根或目录结构变了，规则已失效
+        if (pagePkgs.isEmpty()) {
+            throw GradleException(
+                "checkLayering 失效：源码里推不出任何 $layeringRoot.ui.* 页面包。" +
+                    "要么包根改名了（同步改 build.gradle.kts 里的 layeringRoot），要么这条规则已无意义。"
+            )
         }
+
+        // 红测：植一个假违规，确认门真的抓得到，否则上面那句 OK 不可信
+        val fakeDir = layout.buildDirectory.dir("layering-selftest").get().asFile
+        fakeDir.mkdirs()
+        val fake = java.io.File(fakeDir, "LayeringSelfTest.kt")
+        val caught: Int
+        try {
+            fake.writeText(
+                """
+                package $layeringRoot.storage
+
+                import $layeringRoot.ui.home.BusHomeModel
+
+                internal object LayeringSelfTest
+                """.trimIndent()
+            )
+            val (fakeViolations, _, _) = layeringScan(real + fake)
+            caught = fakeViolations.size - violations.size
+            if (caught == 0) {
+                throw GradleException(
+                    "checkLayering 红测失败：植入的假违规没被抓到，先修门再谈 OK。"
+                )
+            }
+        } finally {
+            fake.delete()
+        }
+        logger.lifecycle("红测：植入 1 处假违规，被抓到 $caught 处（门有效）")
+
         if (violations.isNotEmpty()) {
             throw GradleException(
                 buildString {
