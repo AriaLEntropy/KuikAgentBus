@@ -397,7 +397,7 @@ private fun ViewContainer<*, *>.BusChatFileCard(
         event { click { onClick() } }
         Image {
             attr {
-                src(ImageUri.commonAssets("file-generic.svg"))
+                src(ImageUri.commonAssets("file-line.svg"))
                 size(busChatPx(18f), busChatPx(18f))
                 tintColor(palette.deep)
             }
@@ -1084,7 +1084,7 @@ internal fun ViewContainer<*, *>.BusChatArtifactCard(
         event { click { onClick() } }
         Image {
             attr {
-                src(ImageUri.commonAssets("file-generic.svg"))
+                src(ImageUri.commonAssets("file-line.svg"))
                 size(busChatPx(18f), busChatPx(18f))
                 tintColor(palette.deep)
             }
@@ -1144,7 +1144,7 @@ private fun busChatArtifactMeta(size: Long): String {
 }
 
 /** 字节 → 人类可读：B 取整，KB/MB 保留一位小数并去掉多余的 `.0` */
-private fun busChatFileSize(size: Long): String {
+internal fun busChatFileSize(size: Long): String {
     if (size <= 0L) return ""
     if (size < 1024L) return "$size B"
     val kb = size.toDouble() / 1024.0

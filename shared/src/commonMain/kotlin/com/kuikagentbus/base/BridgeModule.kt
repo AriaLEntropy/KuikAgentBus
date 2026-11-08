@@ -87,6 +87,12 @@ class BridgeModule : Module() {
     fun timezoneOffsetMillis(): Long? =
         syncCallNativeMethod("timezoneOffset", null, null).toLongOrNull()
 
+    /** 用系统浏览器打开链接；回 opened / no_handler / failed，原生未实现时为 failed。 */
+    fun openUrl(url: String): String {
+        val args = JSONObject().apply { put("url", url) }
+        return syncCallNativeMethod("openUrl", args, null).ifBlank { "failed" }
+    }
+
     /** 设备屏幕圆角半径（dp）；原生未实现或读取失败时返回 0。 */
     fun screenCornerRadius(): Float =
         syncCallNativeMethod("getScreenCornerRadius", null, null).toFloatOrNull() ?: 0f

@@ -121,6 +121,10 @@ class KRBridgeModule : KuiklyRenderBaseModule() {
                 imeInsetBottom()
             }
 
+            "openUrl" -> {
+                openUrl(params)
+            }
+
             "dateFormatter" -> {
                 dateFormatter(params)
             }
@@ -396,6 +400,19 @@ class KRBridgeModule : KuiklyRenderBaseModule() {
         }
         val radiusDp = if (density > 0f) radiusPx / density else 0f
         return radiusDp.toString()
+    }
+
+    /** 系统浏览器打开链接；回 opened / no_handler / failed，给产物列表里的链接用。 */
+    private fun openUrl(params: String?): String {
+        val url = JSONObject(params ?: "{}").optString("url").trim()
+        if (url.isEmpty()) return "failed"
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val host = activity ?: context ?: return "failed"
+        return runCatching {
+            host.startActivity(intent)
+            "opened"
+        }.getOrElse { if (it is ActivityNotFoundException) "no_handler" else "failed" }
     }
 
     /**

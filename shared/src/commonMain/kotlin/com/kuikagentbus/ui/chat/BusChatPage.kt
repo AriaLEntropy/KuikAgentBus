@@ -136,6 +136,8 @@ internal class BusChatPage : BasePager() {
     private var agentPicked by observable(false)
 
     private var showMenu by observable(false)
+    private var showArtifacts by observable(false)
+    private var artifactRevision by observable(0)
     private var sheet by observable(BusChatSheetKind.NONE)
 
     /** 就地展开的那一组工具行的 key（稿子③）；空串表示都收着，同一时刻只展开一组 */
@@ -196,6 +198,8 @@ internal class BusChatPage : BasePager() {
         getBackPressHandler().addCallback(object : BackPressCallback() {
             override fun handleOnBackPressed() {
                 when {
+                    // 产物整页在最上层，返回先关它
+                    showArtifacts -> showArtifacts = false
                     showAutoApproveConfirm -> showAutoApproveConfirm = false
                     showRemoveConfirm -> showRemoveConfirm = false
                     showDeleteConfirm -> showDeleteConfirm = false
@@ -772,6 +776,95 @@ internal class BusChatPage : BasePager() {
         }
     }
 
+    /** 打开右上角「产物」整页；先把任务的最新产物列表拉一次，再按 id 预取图片缩略图 */
+    private fun openArtifacts() {
+        showMenu = false
+        if (taskId.isNotEmpty()) {
+            val latest = runCatching { chatSource?.artifacts(taskId) }.getOrNull().orEmpty()
+            val next = busChatListableArtifacts(latest)
+            if (next != artifacts.toList()) {
+                artifacts.clear()
+                artifacts.addAll(next)
+            }
+            next.filter { it.kind == "image" }.forEach(::loadArtifactPreview)
+        }
+        artifactRevision++
+        showArtifacts = true
+    }
+
+    private fun artifactFileKey(artifact: BusChatArtifact): String = "artifact:${artifact.id}"
+
+    private fun artifactOpenState(artifact: BusChatArtifact): BusChatFileState =
+        fileStates[artifactFileKey(artifact)] ?: BusChatFileState(BusChatFileStatus.Idle)
+
+    private fun artifactPreviewState(artifact: BusChatArtifact): BusChatArtifactState =
+        artifactStates[artifact.id] ?: BusChatArtifactState(BusChatArtifactStatus.Loading)
+
+    private fun loadArtifactPreview(artifact: BusChatArtifact) {
+        if (artifact.kind != "image" || artifact.id.isBlank()) return
+        if (artifactStates.containsKey(artifact.id) || !artifactInFlight.add(artifact.id)) return
+        val source = chatSource ?: return
+        artifactStates = artifactStates + (artifact.id to BusChatArtifactState(BusChatArtifactStatus.Loading))
+        artifactRevision++
+        source.fetchArtifact(artifact.id, artifact.contentType) { state ->
+            artifactInFlight.remove(artifact.id)
+            if (!alive) return@fetchArtifact
+            artifactStates = artifactStates + (artifact.id to state)
+            artifactRevision++
+        }
+    }
+
+    /** 产物列表点一行：链接走系统浏览器，其余先取回字节再交给系统应用 */
+    private fun openArtifact(artifact: BusChatArtifact) {
+        if (!busChatArtifactUsable(artifact)) return
+        if (artifact.kind == "link") {
+            val result = runCatching { bridgeModule?.openUrl(artifact.url) }.getOrNull().orEmpty()
+            if (result != "opened") showToast(busChatOpenFailure(result))
+            return
+        }
+        val key = artifactFileKey(artifact)
+        val current = fileStates[key]?.status
+        if (current == BusChatFileStatus.Fetching || current == BusChatFileStatus.Downloading) return
+        val preview = artifactStates[artifact.id]
+        if (preview?.status == BusChatArtifactStatus.Ready && preview.path.isNotBlank()) {
+            openArtifactPath(key, preview.path, artifact.contentType)
+            return
+        }
+        val source = chatSource ?: return
+        fileStates = fileStates + (key to BusChatFileState(BusChatFileStatus.Downloading, BUS_CHAT_FILE_DOWNLOADING))
+        artifactRevision++
+        source.fetchArtifact(artifact.id, artifact.contentType) { state ->
+            if (!alive) return@fetchArtifact
+            if (state.status != BusChatArtifactStatus.Ready) {
+                fileStates = fileStates + (
+                    key to BusChatFileState(
+                        BusChatFileStatus.Failed,
+                        state.label.ifBlank { BUS_CHAT_ARTIFACT_FAILED },
+                        state.reason,
+                    )
+                    )
+                artifactRevision++
+                return@fetchArtifact
+            }
+            openArtifactPath(key, state.path, artifact.contentType)
+        }
+    }
+
+    private fun openArtifactPath(key: String, path: String, contentType: String) {
+        val source = chatSource ?: return
+        fileStates = fileStates + (key to BusChatFileState(BusChatFileStatus.Downloading, BUS_CHAT_FILE_DOWNLOADING))
+        artifactRevision++
+        source.openFile(path, contentType) { result ->
+            if (!alive) return@openFile
+            fileStates = fileStates + if (result == "opened") {
+                key to BusChatFileState(BusChatFileStatus.Idle)
+            } else {
+                key to BusChatFileState(BusChatFileStatus.Failed, busChatOpenFailure(result), result)
+            }
+            artifactRevision++
+        }
+    }
+
     /** 记录重发之后，这条消息里那个文件现在长什么样（artifactId 可能刚被补上） */
     private fun fileRefOf(messageId: String, path: String): DshMessageFileRef? {
         val row = chatRows.firstOrNull { (it as? BusChatRow.Message)?.message?.id == messageId }
@@ -1151,10 +1244,7 @@ internal class BusChatPage : BasePager() {
                                                     palette = palette,
                                                     artifact = item.artifact,
                                                     onClick = {
-                                                        // 不可用的那件只剩一个标签，点了没有下一步
-                                                        if (busChatArtifactUsable(item.artifact)) {
-                                                            this@BusChatPage.showToast("产物在电脑上查看")
-                                                        }
+                                                        this@BusChatPage.openArtifact(item.artifact)
                                                     },
                                                 )
                                             }
@@ -1284,13 +1374,7 @@ internal class BusChatPage : BasePager() {
                             artifactCount = { this@BusChatPage.artifacts.size },
                             canDelete = { this@BusChatPage.canDelete() },
                             busy = { this@BusChatPage.deleteBusy },
-                            onArtifacts = {
-                                this@BusChatPage.showMenu = false
-                                val count = this@BusChatPage.artifacts.size
-                                this@BusChatPage.showToast(
-                                    if (count == 0) "产物都保存在电脑上" else "本站 $count 件产物 · 在电脑上查看",
-                                )
-                            },
+                            onArtifacts = { this@BusChatPage.openArtifacts() },
                             onOpenOnComputer = {
                                 this@BusChatPage.showMenu = false
                                 this@BusChatPage.showToast("完整视图请在电脑上查看")
@@ -1433,6 +1517,20 @@ internal class BusChatPage : BasePager() {
                         this@BusChatPage.pagerData.safeAreaInsets.bottom,
                     colors = { this@BusChatPage.themeColors },
                 )
+                // 右上角「产物」：整页文件列表；状态变化时用 revision 重建这一层
+                vif({ this@BusChatPage.showArtifacts }) {
+                    vbind({ this@BusChatPage.artifactRevision }) {
+                        BusChatArtifactsPage(
+                            palette = palette,
+                            topInset = inset,
+                            artifacts = this@BusChatPage.artifacts.toList(),
+                            openState = { this@BusChatPage.artifactOpenState(it) },
+                            previewState = { this@BusChatPage.artifactPreviewState(it) },
+                            onBack = { this@BusChatPage.showArtifacts = false },
+                            onOpen = { this@BusChatPage.openArtifact(it) },
+                        )
+                    }
+                }
                 // 浮层开合时同步系统栏明暗；放在最后还是不占位
                 vbind({ this@BusChatPage.overlayVisible() }) {
                     this@BusChatPage.syncSystemBarsDim()

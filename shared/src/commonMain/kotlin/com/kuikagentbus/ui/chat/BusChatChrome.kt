@@ -158,7 +158,7 @@ internal fun ViewContainer<*, *>.BusChatHeader(
     }
 }
 
-private fun ViewContainer<*, *>.BusChatIconButton(
+internal fun ViewContainer<*, *>.BusChatIconButton(
     palette: BusChatPalette,
     asset: String,
     iconSize: Float,
@@ -302,7 +302,7 @@ internal fun ViewContainer<*, *>.BusChatMenuLayer(
                 border(Border(1f, BorderStyle.SOLID, palette.surfaceBorder))
                 boxShadow(BoxShadow(0f, 18f, 44f, BusChatTokens.overlayShadow))
             }
-            BusChatMenuItem(palette, "file-generic.svg", "产物", count = artifactCount()) {
+            BusChatMenuItem(palette, "file-line.svg", "产物", count = artifactCount()) {
                 onArtifacts()
             }
             BusChatMenuItem(palette, "icon-refresh16.svg", "在电脑上打开") {
