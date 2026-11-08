@@ -8,6 +8,8 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import com.tencent.kuikly.core.render.android.IKuiklyRenderExport
 import com.tencent.kuikly.core.render.android.adapter.KuiklyRenderAdapterManager
 import com.tencent.kuikly.core.render.android.css.ktx.toMap
@@ -67,7 +69,17 @@ class KuiklyRenderActivity : AppCompatActivity(), KuiklyRenderViewBaseDelegatorD
         kuiklyRenderViewDelegator.onAttach(hrContainerView, "", pageName, createPageData())
     }
 
-    override fun softInputMode(): Int? = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+    /**
+     * 对话页整屏沉浸，输入条自己按完整 IME inset 抬升；窗口不能再 resize，
+     * 否则系统抬一次、输入条 margin 再抬一次，就是两次抬升。
+     * 其他页面（SSH 表单、重命名等）继续用 adjustResize，交给系统重排。
+     */
+    override fun softInputMode(): Int? =
+        if (pageName == "bus_chat") {
+            WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
+        } else {
+            WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+        }
 
     /**
      * 触摸落在聚焦输入框之外的区域时，清除输入框焦点并收起键盘（移动端标准行为）：
@@ -82,7 +94,9 @@ class KuiklyRenderActivity : AppCompatActivity(), KuiklyRenderViewBaseDelegatorD
                 focused.getLocationOnScreen(loc)
                 val hit = ev.rawX >= loc[0] && ev.rawX <= loc[0] + focused.width &&
                     ev.rawY >= loc[1] && ev.rawY <= loc[1] + focused.height
-                if (!hit) {
+                // 输入条/草稿芯片这一带是「操作输入」而不是「离开输入」：
+                // 发送、加号、模型、Agent 芯片的点击不能被这里先收掉键盘。
+                if (!hit && !isInComposerBand(ev.rawY)) {
                     focused.clearFocus()
                     val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
                     imm.hideSoftInputFromWindow(focused.windowToken, 0)
@@ -90,6 +104,25 @@ class KuiklyRenderActivity : AppCompatActivity(), KuiklyRenderViewBaseDelegatorD
             }
         }
         return super.dispatchTouchEvent(ev)
+    }
+
+    /**
+     * 输入条本身占用的屏幕纵向范围（草稿芯片 + 输入胶囊）。
+     *
+     * 宽度固定为设计稿的输入条高度：芯片 62 + 间距 6 + 胶囊 44 + 上下留白，
+     * 约 130dp。这里只保护这一条，正文区域的点击仍然照常收键盘；
+     * 页面正文另外挂了一个 click 事件，做到「点画面空白处就收起」。
+     */
+    private fun isInComposerBand(rawY: Float): Boolean {
+        val density = resources.displayMetrics.density
+        val screenHeight = resources.displayMetrics.heightPixels.toFloat()
+        val imePx = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            ViewCompat.getRootWindowInsets(window.decorView)
+                ?.getInsets(WindowInsetsCompat.Type.ime())?.bottom ?: 0
+        } else {
+            0
+        }
+        return rawY >= screenHeight - imePx - 132f * density
     }
 
     override fun onBackPressed() {

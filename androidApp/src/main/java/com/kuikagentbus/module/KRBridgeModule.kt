@@ -13,6 +13,8 @@ import android.net.Uri
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
@@ -113,6 +115,10 @@ class KRBridgeModule : KuiklyRenderBaseModule() {
 
             "getScreenCornerRadius" -> {
                 screenCornerRadius()
+            }
+
+            "imeInsetBottom" -> {
+                imeInsetBottom()
             }
 
             "dateFormatter" -> {
@@ -390,6 +396,22 @@ class KRBridgeModule : KuiklyRenderBaseModule() {
         }
         val radiusDp = if (density > 0f) radiusPx / density else 0f
         return radiusDp.toString()
+    }
+
+    /**
+     * 完整 IME 底边 inset（dp，含导航栏）。
+     *
+     * Kuikly 的 KRKeyboardModule 在 Android 11+ 会减掉 navigationBars，适合窗口 resize
+     * 的页面；对话页是整屏沉浸 + adjustNothing，需要的是从物理底边到键盘顶的完整距离。
+     * API 30 以下拿不到可靠的 ime inset，返回 -1 让页面用 Kuikly 上报值。
+     */
+    private fun imeInsetBottom(): String {
+        val act = activity ?: return "-1"
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return "-1"
+        val insets = ViewCompat.getRootWindowInsets(act.window.decorView) ?: return "-1"
+        val density = act.resources.displayMetrics.density
+        if (density <= 0f) return "0"
+        return (insets.getInsets(WindowInsetsCompat.Type.ime()).bottom / density).toString()
     }
 
     private fun dateFormatter(params: String?): String {

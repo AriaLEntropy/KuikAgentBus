@@ -91,6 +91,16 @@ class BridgeModule : Module() {
     fun screenCornerRadius(): Float =
         syncCallNativeMethod("getScreenCornerRadius", null, null).toFloatOrNull() ?: 0f
 
+    /**
+     * 当前 IME 底边 inset（dp，含导航栏）。
+     *
+     * Kuikly 的 keyboardHeightChange 在 Android 11+ 上报的是 `ime - navigationBars`，
+     * 只适合窗口自己会 resize 的页面；整屏沉浸 + adjustNothing 的页面需要完整 inset。
+     * 原生取不到（iOS/JS 或 API 30 以下）时返回 -1，调用方退回 Kuikly 上报值。
+     */
+    fun imeInsetBottom(): Float =
+        syncCallNativeMethod("imeInsetBottom", null, null).toFloatOrNull() ?: -1f
+
     /** 设备与 App 信息（version/model/os），供问题反馈包使用；不支持时返回 null。 */
     fun getDeviceInfo(): JSONObject? {
         val raw = syncCallNativeMethod("getDeviceInfo", null, null)

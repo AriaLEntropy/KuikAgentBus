@@ -1,6 +1,5 @@
 package com.kuikagentbus.ui.chat
 
-import com.tencent.kuikly.core.base.Animation
 import com.tencent.kuikly.core.base.Border
 import com.tencent.kuikly.core.base.BorderStyle
 import com.tencent.kuikly.core.base.BoxShadow
@@ -89,6 +88,8 @@ internal fun ViewContainer<*, *>.BusChatComposer(
     onStop: () -> Unit,
     keyboardHeight: () -> Float,
     onKeyboardHeightChange: (Float) -> Unit,
+    onInputFocusChange: (Boolean) -> Unit,
+    onBackgroundTap: () -> Unit,
     inputRef: (InputView) -> Unit,
 ) {
     View {
@@ -108,7 +109,9 @@ internal fun ViewContainer<*, *>.BusChatComposer(
                 },
             )
             marginBottom(keyboardHeight())
-            animation(Animation.easeInOut(0.24f), keyboardHeight())
+            // 这里不能对 marginBottom 做动画：Kuikly 的布局动画会让画面先动、
+            // 原生输入框后动（甚至停在旧位置），输入框的 canvas 与原生 hit target 会错位。
+            // 键盘自己已经有上浮动画，输入条直接跳到最终位置，正确性优先。
         }
         // 只读说明：贴在芯片行上方，一行灰字，不带图标底盘
         vif({ readOnly() }) {
@@ -148,10 +151,13 @@ internal fun ViewContainer<*, *>.BusChatComposer(
                 height(h)
                 overflow(true)
                 opacity(if (show) 1f else 0f)
-                animation(Animation.easeOut(0.16f), h)
+                // 高度不能再做动画：高度是布局属性，动画中间帧会把下面的输入胶囊
+                // 挤出输入条根节点，胶囊跟着滑到键盘底下，只剩两枚草稿芯片露出来
                 flexDirectionColumn()
                 marginBottom(if (show) busChatPx(6f) else 0f)
             }
+            // 点芯片行空白处也收起键盘；芯片本身的 click 会吃掉事件
+            event { click { onBackgroundTap() } }
             vbind({ workspaceLabel().isBlank() }) {
                 BusChatDraftChoice(
                     palette = palette,
@@ -256,7 +262,11 @@ internal fun ViewContainer<*, *>.BusChatComposer(
                     event {
                         textDidChange { onDraftChange(it.text) }
                         keyboardHeightChange { onKeyboardHeightChange(it.height) }
-                        inputBlur { onKeyboardHeightChange(0f) }
+                        inputFocus { onInputFocusChange(true) }
+                        inputBlur {
+                            onInputFocusChange(false)
+                            onKeyboardHeightChange(0f)
+                        }
                     }
                 }
                 // 模型芯片：文案 + 右侧小箭头，只读时点了没反应

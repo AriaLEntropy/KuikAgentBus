@@ -18,6 +18,7 @@ import com.kuikagentbus.ui.home.taskStatusLabel
 import com.kuikagentbus.ui.session.DshSessionConfirmDialog
 import com.tencent.kuikly.core.annotations.Page
 import com.tencent.kuikly.core.base.Animation
+import com.tencent.kuikly.core.base.BackPressCallback
 import com.tencent.kuikly.core.base.Color
 import com.tencent.kuikly.core.base.ViewBuilder
 import com.tencent.kuikly.core.base.ViewContainer
@@ -117,7 +118,12 @@ internal class BusChatPage : BasePager() {
     private var loading by observable(false)
     private var hasMore by observable(false)
     private var lastMessage by observable("")
+    /** 完整 IME inset（dp，含导航栏）；对话页用 adjustNothing，窗口不会自己让位 */
     private var keyboardHeight by observable(0f)
+    private var inputFocused by observable(false)
+    private var focusBeforeSheet = false
+    private var keyboardScrollToken = 0
+    private var bridgeModule: BridgeModule? = null
     private var pendingRequest by observable<BusChatPendingRequest?>(null)
     private var requestBusy by observable(false)
     private var requestError by observable("")
@@ -186,6 +192,24 @@ internal class BusChatPage : BasePager() {
         super.created()
         // 390×844 设计稿按页面宽度等比缩放；created 里先设一次，避免首屏用到默认值
         BusChatTokens.updateDesignScale(pagerData.pageViewWidth)
+        bridgeModule = runCatching { acquireModule<BridgeModule>(BridgeModule.MODULE_NAME) }.getOrNull()
+        getBackPressHandler().addCallback(object : BackPressCallback() {
+            override fun handleOnBackPressed() {
+                when {
+                    showAutoApproveConfirm -> showAutoApproveConfirm = false
+                    showRemoveConfirm -> showRemoveConfirm = false
+                    showDeleteConfirm -> showDeleteConfirm = false
+                    showMenu -> showMenu = false
+                    // 单步详情返回上一层列表，而不是直接关掉整个面板
+                    sheet == BusChatSheetKind.STEP_DETAIL -> sheet = BusChatSheetKind.STEPS
+                    sheet != BusChatSheetKind.NONE -> sheet = BusChatSheetKind.NONE
+                    // 键盘还开着时先收键盘；系统通常已经吃掉第一下 back，
+                    // 所以这里用「键盘高度」而不是焦点判断，避免再空按一次
+                    keyboardHeight > 0f -> inputView?.blur()
+                    else -> close()
+                }
+            }
+        })
         val params = pageData.params
         taskId = params.optString("taskId")
         computerAgentId = params.optString("agentId")
@@ -250,6 +274,9 @@ internal class BusChatPage : BasePager() {
 
     override fun pageWillDestroy() {
         alive = false
+        inputFocused = false
+        keyboardHeight = 0f
+        bridgeModule = null
         runCatching {
             acquireModule<BridgeModule>(BridgeModule.MODULE_NAME).setSystemBarsDimmed(false)
         }
@@ -448,6 +475,36 @@ internal class BusChatPage : BasePager() {
         toast = text
         setTimeout(pagerId, 2200) {
             if (toast == text) toast = ""
+        }
+    }
+
+    /**
+     * Kuikly 在 Android 11+ 上报的是 ime - navigationBars；对话页是 adjustNothing，
+     * 物理底边到键盘顶的距离必须用原生完整 inset，否则会少抬一个导航栏。
+     */
+    private fun fullKeyboardInset(reported: Float): Float {
+        if (reported <= 0f) return 0f
+        val native = bridgeModule?.imeInsetBottom() ?: -1f
+        return if (native > 0f) native else reported
+    }
+
+    /** 打开输入类浮层前先让出键盘，并记住来的时候输入框有没有焦点 */
+    private fun openSheet(kind: BusChatSheetKind) {
+        // 从浮层里再进下一层（技能列表 → 技能正文）时不要覆盖第一次记下的焦点状态
+        if (sheet == BusChatSheetKind.NONE) focusBeforeSheet = inputFocused
+        inputView?.blur()
+        sheet = kind
+    }
+
+    /** 选择完浮层内容后回到输入条；只有来的时候有焦点才重新叫键盘 */
+    private fun restoreComposerFocus(restoreText: Boolean = false) {
+        if (!focusBeforeSheet) return
+        focusBeforeSheet = false
+        // Agent 变化会整页重建，等新输入框挂上再回填/聚焦
+        setTimeout(pagerId, 200) {
+            if (!alive) return@setTimeout
+            if (restoreText) inputView?.setText(draft)
+            inputView?.focus()
         }
     }
 
@@ -757,6 +814,7 @@ internal class BusChatPage : BasePager() {
         }
         sheet = BusChatSheetKind.NONE
         showToast("下一条消息使用 ${modelLabel()}")
+        restoreComposerFocus()
     }
 
     private fun selectEffort(value: String) {
@@ -770,6 +828,7 @@ internal class BusChatPage : BasePager() {
             // followUp 不带 projectPath，续聊换工作区没有意义，只说明原因
             sheet = BusChatSheetKind.NONE
             showToast("工作区只随新建任务发出，续聊不能更换")
+            restoreComposerFocus()
             return
         }
         projectPath = workspace.path
@@ -777,6 +836,7 @@ internal class BusChatPage : BasePager() {
         workspacePicked = true
         sheet = BusChatSheetKind.NONE
         showToast("工作区 ${workspace.name}")
+        restoreComposerFocus()
     }
 
     private fun selectAgent(key: String) {
@@ -806,11 +866,13 @@ internal class BusChatPage : BasePager() {
         skillsError = ""
         skillsRevision++
         showToast("已选择 ${option.name}")
+        // agentKey 变化会整页重建，原生输入框文本会丢；回来时把草稿补回去再聚焦
+        restoreComposerFocus(restoreText = true)
     }
 
     private fun openAttach() {
         refreshSkills()
-        sheet = BusChatSheetKind.ATTACH
+        openSheet(BusChatSheetKind.ATTACH)
     }
 
     private fun refreshSkills() {
@@ -869,7 +931,7 @@ internal class BusChatPage : BasePager() {
         skillContentError = ""
         skillContentLoading = true
         skillsRevision++
-        sheet = BusChatSheetKind.SKILL_DETAIL
+        openSheet(BusChatSheetKind.SKILL_DETAIL)
         val requestedAgent = agentKey
         val requestedProject = projectPath
         val requestedTask = taskId
@@ -894,6 +956,7 @@ internal class BusChatPage : BasePager() {
         draft = if (draft.isBlank()) token else "${draft.trimEnd()} $token"
         inputView?.setText(draft)
         sheet = BusChatSheetKind.NONE
+        restoreComposerFocus()
     }
 
     private fun close() {
@@ -934,6 +997,12 @@ internal class BusChatPage : BasePager() {
                             attr {
                                 flex(1f)
                                 flexDirectionColumn()
+                            }
+                            // 点正文空白处收起键盘；点在卡片/按钮上时由子控件消费，
+                            // 不会误收。原生 dispatchTouchEvent 只保护输入条那一条，
+                            // 正文这一段靠这个显式事件兜底。
+                            event {
+                                click { this@BusChatPage.inputView?.blur() }
                             }
                             // 新建会话：空态只放品牌字标，不再挂底部说明
                             // 键盘弹起后字标让位给键盘与草稿芯片，正文区留空
@@ -1173,7 +1242,7 @@ internal class BusChatPage : BasePager() {
                             autoApprove = { this@BusChatPage.stagedAutoApproveValue() },
                             onDraftChange = { this@BusChatPage.draft = it },
                             onPlus = { this@BusChatPage.openAttach() },
-                            onModel = { this@BusChatPage.sheet = BusChatSheetKind.MODEL },
+                            onModel = { this@BusChatPage.openSheet(BusChatSheetKind.MODEL) },
                             onAutoApprove = {
                                 val next = !this@BusChatPage.stagedAutoApproveValue()
                                 if (next && !this@BusChatPage.autoApproveExplained) {
@@ -1186,12 +1255,26 @@ internal class BusChatPage : BasePager() {
                                     )
                                 }
                             },
-                            onWorkspace = { this@BusChatPage.sheet = BusChatSheetKind.WORKSPACE },
-                            onAgentPick = { this@BusChatPage.sheet = BusChatSheetKind.AGENT },
+                            onWorkspace = { this@BusChatPage.openSheet(BusChatSheetKind.WORKSPACE) },
+                            onAgentPick = { this@BusChatPage.openSheet(BusChatSheetKind.AGENT) },
                             onSend = { this@BusChatPage.send() },
                             onStop = { this@BusChatPage.stop() },
                             keyboardHeight = { this@BusChatPage.keyboardHeight },
-                            onKeyboardHeightChange = { this@BusChatPage.keyboardHeight = it },
+                            onKeyboardHeightChange = { reported ->
+                                this@BusChatPage.keyboardHeight =
+                                    this@BusChatPage.fullKeyboardInset(reported)
+                                val token = ++this@BusChatPage.keyboardScrollToken
+                                if (this@BusChatPage.atBottom) {
+                                    setTimeout(pagerId, 120) {
+                                        val page = this@BusChatPage
+                                        if (page.alive && token == page.keyboardScrollToken && page.atBottom) {
+                                            page.scrollToBottomNow()
+                                        }
+                                    }
+                                }
+                            },
+                            onInputFocusChange = { this@BusChatPage.inputFocused = it },
+                            onBackgroundTap = { this@BusChatPage.inputView?.blur() },
                             inputRef = { this@BusChatPage.inputView = it },
                         )
                     vif({ this@BusChatPage.showMenu }) {
