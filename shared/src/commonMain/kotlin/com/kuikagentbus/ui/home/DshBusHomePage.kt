@@ -964,6 +964,12 @@ internal class DshBusHomePage : BasePager() {
         busCache = localBusCache?.let {
             runCatching { BusCache(it, nowIso = { BusCommands.createdAt() }) }.getOrNull()
         }
+        // 冷启动（桌面图标进入）没有 connectionMode 参数；只要本机还存着配对档案，
+        // 就按 relay 恢复连接，不能停在“没有电脑”让用户重新扫码。
+        if (connectionMode.isEmpty()) {
+            val profile = runCatching { store?.loadRelayProfile() }.getOrNull()
+            if (profile != null) connectionMode = "relay"
+        }
         hostId = knownHostId()
         localHostName = runCatching { store?.loadRelayProfile()?.hostName }
             .getOrNull()
@@ -1009,7 +1015,7 @@ internal class DshBusHomePage : BasePager() {
 
     /** 从连接页进来时，探测连接已被拆掉，统一首页自己重新连上 Relay。 */
     private fun connectIfNeeded() {
-        if (pageData.params.optString("connectionMode") != "relay") return
+        if (connectionMode != "relay") return
         runCatching {
             acquireModule<DshRelayModule>(DshRelayModule.MODULE_NAME).connect { refreshBusHome() }
         }
