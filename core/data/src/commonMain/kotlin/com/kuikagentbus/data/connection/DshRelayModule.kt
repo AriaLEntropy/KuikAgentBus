@@ -108,6 +108,14 @@ class DshRelayModule : Module() {
             ?.takeIf { it.isNotBlank() }
     }
 
+    /** FR-10.1：取最近一条 notify 的 JSON；读完即清。 */
+    fun busTakeNotify(): String? {
+        val raw = toNative(false, "busTakeNotify", null, null, true).toString()
+        return runCatching { JSONObject(raw).optString("json") }
+            .getOrNull()
+            ?.takeIf { it.isNotBlank() }
+    }
+
     /** "agent-host" / "dsh-plugin" / "unknown"；还没探测完时返回 null。 */
     fun busHostKind(): String? {
         val raw = toNative(false, "busHostKind", null, null, true).toString()

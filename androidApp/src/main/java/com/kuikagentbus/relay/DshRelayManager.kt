@@ -353,8 +353,11 @@ internal object DshRelayManager {
         val token = localToken
         thread(name = "agent-host-bus", isDaemon = true) {
             val stored = secrets ?: return@thread
-            runCatching { AgentHostBus.start(port, token, stored) { !stopped && generation.get() == myGeneration } }
-                .onFailure { error -> Log.w(TAG, "agent-host bus stopped", error) }
+            runCatching {
+                AgentHostBus.start(port, token, stored, appContext) {
+                    !stopped && generation.get() == myGeneration
+                }
+            }.onFailure { error -> Log.w(TAG, "agent-host bus stopped", error) }
         }
     }
 

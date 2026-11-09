@@ -1,7 +1,10 @@
 package com.kuikagentbus.module
 
 import android.app.Activity
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import com.kuikagentbus.protocol.BUS_UPLOAD_ID_BYTES
 import com.kuikagentbus.protocol.busBase64Url
 import com.kuikagentbus.relay.ArtifactFetch
@@ -30,6 +33,7 @@ internal class KRDshRelayModule : KuiklyRenderBaseModule() {
             null
         }
         "connect" -> {
+            requestNotificationPermission()
             DshRelayManager.connect(requireNotNull(context))
             listen(callback)
             null
@@ -45,6 +49,7 @@ internal class KRDshRelayModule : KuiklyRenderBaseModule() {
         }
         "status" -> DshRelayManager.current().toMap()
         "busHome" -> mapOf("json" to (AgentHostBus.busHomeJson() ?: ""))
+        "busTakeNotify" -> mapOf("json" to (AgentHostBus.takeBusNotify() ?: ""))
         "busHostKind" -> mapOf("kind" to AgentHostBus.busHostKind())
         "busTaskMessages" -> {
             val taskId = runCatching { JSONObject(params ?: "{}").optString("taskId") }.getOrDefault("")
@@ -186,9 +191,24 @@ internal class KRDshRelayModule : KuiklyRenderBaseModule() {
         "generation" to generation,
     )
 
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT < 33) return
+        val current = activity ?: return
+        if (current.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
+        current.requestPermissions(
+            arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+            REQUEST_NOTIFICATIONS,
+        )
+    }
+
     companion object {
         const val MODULE_NAME = "DshRelayModule"
         const val REQUEST_QR = 4102
+        private const val REQUEST_NOTIFICATIONS = 4103
         private var active: KRDshRelayModule? = null
 
         fun dispatchActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {

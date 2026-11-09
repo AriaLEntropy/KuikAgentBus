@@ -46,6 +46,7 @@ import com.tencent.kuikly.core.directives.vif
 import com.tencent.kuikly.core.module.RouterModule
 import com.tencent.kuikly.core.module.SharedPreferencesModule
 import com.tencent.kuikly.core.nvi.serialization.json.JSONObject
+import com.tencent.kuikly.core.layout.FlexPositionType
 import com.tencent.kuikly.core.reactive.handler.observable
 import com.tencent.kuikly.core.reactive.handler.observableList
 import com.tencent.kuikly.core.timer.setTimeout
@@ -114,6 +115,10 @@ internal class DshBusHomePage : BasePager() {
     private var removeProjectError by observable("")
     private var removeProjectPath by observable("")
     private var localHostName by observable("")
+    private var busBannerVisible by observable(false)
+    private var busBannerAgent by observable("")
+    private var busBannerTitle by observable("")
+    private var busBannerBody by observable("")
 
     // ---------- 审批视图状态（渲染层只读，改由这里负责） ----------
     private var approvalFilter by observable(BUS_APPROVAL_FILTER_ALL)
@@ -1001,6 +1006,7 @@ internal class DshBusHomePage : BasePager() {
         restoreCachedHome()
         refreshBusHome()
         pollBusHome()
+        pollBusNotify()
         connectIfNeeded()
         if (hasConnection) {
             setTimeout(pagerId, 8_000) {
@@ -1106,6 +1112,29 @@ internal class DshBusHomePage : BasePager() {
             if (!alive) return@setTimeout
             refreshBusHome()
             pollBusHome()
+        }
+    }
+
+    /** FR-10.1：前台横幅。原生收到 notify 后留一份，这里取走并显示 3 秒。 */
+    private fun pollBusNotify() {
+        setTimeout(pagerId, 700) {
+            if (!alive) return@setTimeout
+            val raw = runCatching {
+                acquireModule<DshRelayModule>(DshRelayModule.MODULE_NAME).busTakeNotify()
+            }.getOrNull()
+            if (!raw.isNullOrBlank()) {
+                val notify = runCatching { JSONObject(raw) }.getOrNull()
+                if (notify != null) {
+                    busBannerAgent = notify.optString("agentName")
+                    busBannerTitle = notify.optString("title")
+                    busBannerBody = notify.optString("body")
+                    busBannerVisible = true
+                    setTimeout(pagerId, 3_000) {
+                        if (alive) busBannerVisible = false
+                    }
+                }
+            }
+            pollBusNotify()
         }
     }
 
@@ -1344,6 +1373,59 @@ internal class DshBusHomePage : BasePager() {
                         onClose = { this@DshBusHomePage.showDeviceSheet = false },
                         onAddComputer = { this@DshBusHomePage.openAddComputer() },
                     )
+                }
+            }
+
+            vif({ this@DshBusHomePage.busBannerVisible }) {
+                View {
+                    attr {
+                        positionType(FlexPositionType.ABSOLUTE)
+                        top(
+                            dshTopInset(
+                                this@DshBusHomePage.pagerData.statusBarHeight,
+                                this@DshBusHomePage.pagerData.safeAreaInsets.top,
+                            ) + busHomePx(8f),
+                        )
+                        left(busHomePx(12f))
+                        right(busHomePx(12f))
+                        borderRadius(busHomePx(14f))
+                        backgroundColor(this@DshBusHomePage.palette().surface)
+                        paddingLeft(busHomePx(14f))
+                        paddingRight(busHomePx(14f))
+                        paddingTop(busHomePx(11f))
+                        paddingBottom(busHomePx(11f))
+                    }
+                    Text {
+                        attr {
+                            text(this@DshBusHomePage.busBannerAgent)
+                            fontSize(busHomePx(11f))
+                            color(this@DshBusHomePage.palette().textTertiary)
+                            lines(1)
+                            textOverFlowTail()
+                        }
+                    }
+                    Text {
+                        attr {
+                            text(this@DshBusHomePage.busBannerTitle)
+                            fontSize(busHomePx(13.5f))
+                            fontWeightSemiBold()
+                            color(this@DshBusHomePage.palette().textPrimary)
+                            marginTop(busHomePx(2f))
+                            lines(1)
+                            textOverFlowTail()
+                        }
+                    }
+                    Text {
+                        attr {
+                            text(this@DshBusHomePage.busBannerBody)
+                            fontSize(busHomePx(12f))
+                            lineHeight(busHomePx(17f))
+                            color(this@DshBusHomePage.palette().textSecondary)
+                            marginTop(busHomePx(2f))
+                            lines(2)
+                            textOverFlowTail()
+                        }
+                    }
                 }
             }
 

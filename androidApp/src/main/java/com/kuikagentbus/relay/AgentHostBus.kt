@@ -1,5 +1,6 @@
 package com.kuikagentbus.relay
 
+import android.content.Context
 import android.net.Uri
 import android.util.Log
 import com.kuikagentbus.protocol.BusChannel
@@ -54,6 +55,9 @@ internal object AgentHostBus {
     @Volatile
     private var commandToken: String = ""
 
+    @Volatile
+    private var appContext: Context? = null
+
     /** taskId -> host `taskMessages` payload JSON, updated from /bus/ws events. */
     @Volatile
     private var messagesByTask: Map<String, String> = emptyMap()
@@ -82,10 +86,15 @@ internal object AgentHostBus {
         latestHostKind = ""
         commandPort = 0
         commandToken = ""
+        appContext = null
+        BusNotifyCenter.clear()
         messagesByTask = emptyMap()
         skillListsByKey = emptyMap()
         skillContentsById = emptyMap()
     }
+
+    /** 前台横幅读取最近一条 notify；读完即清。 */
+    fun takeBusNotify(): String? = BusNotifyCenter.take()
 
     fun command(json: String): BusCommandAck? {
         val port = commandPort
@@ -108,11 +117,19 @@ internal object AgentHostBus {
         }.getOrNull()
     }
 
-    fun start(port: Int, token: String, notes: DshRelaySecrets, stillCurrent: () -> Boolean) {
+    fun start(
+        port: Int,
+        token: String,
+        notes: DshRelaySecrets,
+        context: Context?,
+        stillCurrent: () -> Boolean,
+    ) {
         latestHomeJson = null
         latestHostKind = ""
         commandPort = port
         commandToken = token
+        appContext = context
+        BusNotifyCenter.clear()
         messagesByTask = emptyMap()
         skillListsByKey = emptyMap()
         skillContentsById = emptyMap()
@@ -320,6 +337,10 @@ internal object AgentHostBus {
                                 if (skillId.isNotEmpty()) {
                                     skillContentsById = skillContentsById + (skillId to payload.toString())
                                 }
+                            }
+                            "notify" -> {
+                                val payload = event["notify"] as? JsonObject
+                                if (payload != null) BusNotifyCenter.accept(appContext, payload)
                             }
                         }
                     }
