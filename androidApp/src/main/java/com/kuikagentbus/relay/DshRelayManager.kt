@@ -184,14 +184,44 @@ internal object DshRelayManager {
     }
 
     fun forget() {
+        val current = hostId
         disconnect()
         // FR-9.2 验收：解除配对时清掉这台电脑的产物缓存
         appContext?.cacheDir?.let { AgentHostBus.clearArtifactCache(it) }
-        secrets?.clear()
+        if (current.isBlank()) secrets?.clear() else secrets?.clear(current)
         hostId = ""
         hostName = ""
         relayOrigin = ""
         publish(DshRelayNativeState("IDLE", "已移除配对"))
+    }
+
+    /** FR-3.5：切到另一台已保存的电脑；找不到密钥时返回 false，当前连接不动。 */
+    fun switchTo(context: Context, targetHostId: String): Boolean {
+        attach(context)
+        val stored = secrets ?: return false
+        if (targetHostId == hostId && state.phase == "READY") return true
+        if (!stored.select(targetHostId)) return false
+        disconnect()
+        hostId = stored.hostId().orEmpty()
+        hostName = stored.hostName().orEmpty()
+        relayOrigin = stored.relayOrigin().orEmpty()
+        publish(
+            DshRelayNativeState(
+                "IDLE",
+                "已切换电脑",
+                hostId = hostId,
+                hostName = hostName,
+                relayOrigin = relayOrigin,
+                paired = true,
+            ),
+        )
+        connect(context)
+        return true
+    }
+
+    /** 移除一台非当前电脑的配对；当前电脑仍走 forget()。 */
+    fun forgetHost(targetHostId: String) {
+        if (targetHostId == hostId) forget() else secrets?.clear(targetHostId)
     }
 
     private fun connectInternal() {
