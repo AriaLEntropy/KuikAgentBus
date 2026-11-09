@@ -116,6 +116,13 @@ class DshRelayModule : Module() {
             ?.takeIf { it.isNotBlank() }
     }
 
+    /** FR-3.5：切到另一台已保存的电脑。 */
+    fun switchToHost(hostId: String): Boolean {
+        val params = JSONObject().apply { put("hostId", hostId) }
+        val raw = toNative(false, "switchTo", params.toString(), null, true).toString()
+        return runCatching { JSONObject(raw).optBoolean("ok") }.getOrDefault(false)
+    }
+
     /** "agent-host" / "dsh-plugin" / "unknown"；还没探测完时返回 null。 */
     fun busHostKind(): String? {
         val raw = toNative(false, "busHostKind", null, null, true).toString()

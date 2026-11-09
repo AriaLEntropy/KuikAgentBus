@@ -49,6 +49,10 @@ internal class KRDshRelayModule : KuiklyRenderBaseModule() {
         }
         "status" -> DshRelayManager.current().toMap()
         "busHome" -> mapOf("json" to (AgentHostBus.busHomeJson() ?: ""))
+        "switchTo" -> {
+            val hostId = runCatching { JSONObject(params ?: "{}").optString("hostId") }.getOrDefault("")
+            mapOf("ok" to (hostId.isNotBlank() && DshRelayManager.switchTo(requireNotNull(context), hostId)))
+        }
         "busTakeNotify" -> mapOf("json" to (AgentHostBus.takeBusNotify() ?: ""))
         "busHostKind" -> mapOf("kind" to AgentHostBus.busHostKind())
         "busTaskMessages" -> {

@@ -333,18 +333,59 @@ internal class DshBusHomePage : BasePager() {
         localHostName.ifBlank { homeView.device?.name.orEmpty() }
 
     private fun settingsComputers(): List<BusSettingsComputer> {
-        val device = homeView.device ?: return emptyList()
-        return listOf(
+        val profiles = runCatching { store?.loadRelayProfiles() }.getOrNull().orEmpty()
+        val activeHostId = runCatching {
+            acquireModule<DshRelayModule>(DshRelayModule.MODULE_NAME).status().hostId
+        }.getOrNull().orEmpty()
+        if (profiles.isEmpty()) {
+            val device = homeView.device ?: return emptyList()
+            return listOf(
+                BusSettingsComputer(
+                    id = activeHostId.ifBlank { device.agentId },
+                    name = currentComputerName(),
+                    platform = device.platform,
+                    online = device.online,
+                    lastSeenAt = device.lastSeenAt,
+                    appVersion = device.appVersion,
+                    platformAsset = device.platformAsset,
+                    active = true,
+                ),
+            )
+        }
+        return profiles.map { profile ->
+            val active = profile.hostId == activeHostId
+            val device = if (active) homeView.device else null
             BusSettingsComputer(
-                id = device.agentId,
-                name = currentComputerName(),
-                platform = device.platform,
-                online = device.online,
-                lastSeenAt = device.lastSeenAt,
-                appVersion = device.appVersion,
-                platformAsset = device.platformAsset,
-            ),
-        )
+                id = profile.hostId,
+                name = if (active) currentComputerName() else profile.hostName,
+                platform = device?.platform.orEmpty(),
+                online = active && device?.online == true,
+                lastSeenAt = device?.lastSeenAt.orEmpty(),
+                appVersion = device?.appVersion.orEmpty(),
+                platformAsset = device?.platformAsset ?: "computer.svg",
+                active = active,
+            )
+        }
+    }
+
+    private fun switchComputer(hostId: String) {
+        val ok = runCatching {
+            acquireModule<DshRelayModule>(DshRelayModule.MODULE_NAME).switchToHost(hostId)
+        }.getOrDefault(false)
+        if (!ok) {
+            busBannerAgent = ""
+            busBannerTitle = "切换电脑失败"
+            busBannerBody = "找不到这台电脑的配对密钥"
+            busBannerVisible = true
+            setTimeout(pagerId, 3_000) { if (alive) busBannerVisible = false }
+            return
+        }
+        showSettings = false
+        localHostName = runCatching {
+            acquireModule<DshRelayModule>(DshRelayModule.MODULE_NAME).status().hostName
+        }.getOrDefault("")
+        setTimeout(pagerId, 800) { if (alive) refreshBusHome() }
+        setTimeout(pagerId, 2_500) { if (alive) refreshBusHome() }
     }
 
     private fun openRenameComputer() {
@@ -1443,6 +1484,7 @@ internal class DshBusHomePage : BasePager() {
                     colors = { this@DshBusHomePage.themeColors },
                     onClose = { this@DshBusHomePage.showSettings = false },
                     onAddComputer = { this@DshBusHomePage.openAddComputer() },
+                    onSwitchComputer = { this@DshBusHomePage.switchComputer(it.id) },
                     onRenameComputer = { this@DshBusHomePage.openRenameComputer() },
                     onRemoveComputer = {
                         this@DshBusHomePage.removeError = ""

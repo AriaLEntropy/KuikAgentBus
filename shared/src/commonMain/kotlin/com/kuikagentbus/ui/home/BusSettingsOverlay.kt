@@ -26,6 +26,7 @@ internal data class BusSettingsComputer(
     val lastSeenAt: String,
     val appVersion: String,
     val platformAsset: String,
+    val active: Boolean = false,
 )
 
 /**
@@ -41,6 +42,7 @@ internal fun ViewContainer<*, *>.BusSettingsOverlay(
     colors: () -> DshColorTokens,
     onClose: () -> Unit,
     onAddComputer: () -> Unit,
+    onSwitchComputer: (BusSettingsComputer) -> Unit,
     onRenameComputer: (BusSettingsComputer) -> Unit,
     onRemoveComputer: (BusSettingsComputer) -> Unit,
     onPickTheme: () -> Unit,
@@ -114,6 +116,7 @@ internal fun ViewContainer<*, *>.BusSettingsOverlay(
                         BusComputerItem(
                             computer = computer,
                             colors = colors,
+                            onSwitch = { onSwitchComputer(computer) },
                             onRename = { onRenameComputer(computer) },
                             onRemove = { onRemoveComputer(computer) },
                         )
@@ -204,6 +207,7 @@ internal fun ViewContainer<*, *>.BusSettingsOverlay(
 private fun ViewContainer<*, *>.BusComputerItem(
     computer: BusSettingsComputer,
     colors: () -> DshColorTokens,
+    onSwitch: () -> Unit,
     onRename: () -> Unit,
     onRemove: () -> Unit,
 ) {
@@ -288,24 +292,38 @@ private fun ViewContainer<*, *>.BusComputerItem(
                 marginTop(busHomePx(10f))
                 paddingLeft(busHomePx(46f))
             }
-            Text {
-                attr {
-                    text("编辑名称")
-                    fontSize(busHomePx(13f))
-                    fontWeightMedium()
-                    color(colors().stateBusinessPrimary)
+            if (!computer.active) {
+                Text {
+                    attr {
+                        text("切换")
+                        fontSize(busHomePx(13f))
+                        fontWeightMedium()
+                        color(colors().stateBusinessPrimary)
+                    }
+                    event { click { onSwitch() } }
                 }
-                event { click { onRename() } }
             }
-            Text {
-                attr {
-                    text("移除连接")
-                    fontSize(busHomePx(13f))
-                    fontWeightMedium()
-                    color(colors().stateErrorPrimary)
-                    marginLeft(busHomePx(20f))
+            if (computer.active) {
+                Text {
+                    attr {
+                        text("编辑名称")
+                        fontSize(busHomePx(13f))
+                        fontWeightMedium()
+                        color(colors().stateBusinessPrimary)
+                        marginLeft(busHomePx(20f))
+                    }
+                    event { click { onRename() } }
                 }
-                event { click { onRemove() } }
+                Text {
+                    attr {
+                        text("移除连接")
+                        fontSize(busHomePx(13f))
+                        fontWeightMedium()
+                        color(colors().stateErrorPrimary)
+                        marginLeft(busHomePx(20f))
+                    }
+                    event { click { onRemove() } }
+                }
             }
         }
     }
