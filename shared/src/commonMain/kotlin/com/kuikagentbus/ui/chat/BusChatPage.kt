@@ -23,6 +23,7 @@ import com.kuikagentbus.ui.home.BusAgentVisuals
 import com.kuikagentbus.ui.home.BusHomeModelOption
 import com.kuikagentbus.ui.home.taskStatusLabel
 import com.kuikagentbus.ui.session.DshSessionConfirmDialog
+import com.kuikagentbus.ui.rendering.DshTextInputDialog
 import com.tencent.kuikly.core.annotations.Page
 import com.tencent.kuikly.core.base.Animation
 import com.tencent.kuikly.core.base.BackPressCallback
@@ -103,6 +104,12 @@ internal class BusChatPage : BasePager() {
     private var hostName by observable("")
     private var projectPath by observable("")
     private var projectName by observable("")
+    private var projectsRoot = ""
+    /** FR-8.2：已选中的新建项目名；非空时 startTask 带 newProject */
+    private var newProjectName by observable("")
+    private var showNewProjectDialog by observable(false)
+    private var newProjectDraft by observable("")
+    private var newProjectError by observable("")
     private var modelId by observable("")
     private var effort by observable("")
     private var autoApprove by observable(false)
@@ -215,6 +222,7 @@ internal class BusChatPage : BasePager() {
                 when {
                     // 产物整页在最上层，返回先关它
                     showArtifacts -> showArtifacts = false
+                    showNewProjectDialog -> showNewProjectDialog = false
                     showChatConsent -> showChatConsent = false
                     showAutoApproveConfirm -> showAutoApproveConfirm = false
                     showRemoveConfirm -> showRemoveConfirm = false
@@ -246,6 +254,7 @@ internal class BusChatPage : BasePager() {
         }
         projectPath = params.optString("projectPath")
         projectName = params.optString("projectName")
+        projectsRoot = params.optString("projectsRoot")
         modelId = params.optString("model")
         effort = params.optString("effort")
         autoApprove = params.optString("autoApprove") == "true"
@@ -328,7 +337,8 @@ internal class BusChatPage : BasePager() {
 
     /** 全屏浮层（对话框 / 底部面板）出现时，把系统导航栏一起压暗，避免遮罩在底部断一条亮带 */
     private fun overlayVisible(): Boolean =
-        showChatConsent ||
+        showNewProjectDialog ||
+            showChatConsent ||
             showAutoApproveConfirm ||
             showRemoveConfirm ||
             showDeleteConfirm ||
@@ -347,7 +357,7 @@ internal class BusChatPage : BasePager() {
      * 确认弹窗用遮罩结果色；底部面板直接用面板底色，让面板看起来一直铺到屏幕底，不露背景条
      */
     private fun overlayDimColor(): Long {
-        val dialogOnTop = showChatConsent || showAutoApproveConfirm || showRemoveConfirm || showDeleteConfirm
+        val dialogOnTop = showNewProjectDialog || showChatConsent || showAutoApproveConfirm || showRemoveConfirm || showDeleteConfirm
         if (dialogOnTop) {
             return if (themeColors.isDark) 0xFF0D0D0EL else 0xFF929296L
         }
@@ -458,7 +468,9 @@ internal class BusChatPage : BasePager() {
     }
 
     private fun workspaceLabel(): String =
-        if (projectPath.isBlank()) "不在项目中" else projectName.ifBlank { projectPath.substringAfterLast('/') }
+        if (newProjectName.isNotBlank()) newProjectName
+        else if (projectPath.isBlank()) "不在项目中"
+        else projectName.ifBlank { projectPath.substringAfterLast('/') }
 
     private fun avatarAsset(): String = BusAgentVisuals.assetFor(
         source = sourceKind,
@@ -740,6 +752,7 @@ internal class BusChatPage : BasePager() {
             source = sourceKind,
             connectorId = connectorId.ifBlank { null },
             projectPath = projectPath,
+            newProject = newProjectName.takeIf { it.isNotBlank() },
             prompt = prompt,
             model = stagedModel(),
             effort = stagedEffortValue(),
@@ -763,6 +776,7 @@ internal class BusChatPage : BasePager() {
             controllable = true
             clearDraft()
             clearPendingImages()
+            newProjectName = ""
             clearStaged()
             loading = true
             atBottom = true
@@ -790,6 +804,7 @@ internal class BusChatPage : BasePager() {
             }
             clearDraft()
             clearPendingImages()
+            newProjectName = ""
             clearStaged()
             status = "running"
             statusLabel = "运行中"
@@ -1144,10 +1159,38 @@ internal class BusChatPage : BasePager() {
         }
         projectPath = workspace.path
         projectName = workspace.name
+        newProjectName = ""
         workspacePicked = true
         sheet = BusChatSheetKind.NONE
         showToast("工作区 ${workspace.name}")
         restoreComposerFocus()
+    }
+
+    private fun openNewProjectDialog() {
+        if (projectsRoot.isBlank()) {
+            showToast("电脑没有配置项目目录")
+            return
+        }
+        sheet = BusChatSheetKind.NONE
+        newProjectDraft = ""
+        newProjectError = ""
+        showNewProjectDialog = true
+    }
+
+    private fun submitNewProject() {
+        val existing = workspaces.map { it.name }.filter { it.isNotBlank() && it != "不在项目中" }
+        val problem = busChatNewProjectError(newProjectDraft, existing)
+        if (problem != null) {
+            newProjectError = problem
+            return
+        }
+        newProjectName = newProjectDraft.trim()
+        projectPath = ""
+        projectName = newProjectName
+        workspacePicked = true
+        showNewProjectDialog = false
+        newProjectError = ""
+        showToast("将新建项目 $newProjectName")
     }
 
     private fun selectAgent(key: String) {
@@ -1644,7 +1687,7 @@ internal class BusChatPage : BasePager() {
                         stepsTitle = this@BusChatPage.stepTitle,
                         stepIndex = this@BusChatPage.stepIndex,
                         workspaces = this@BusChatPage.workspaces.toList(),
-                        workspacePath = this@BusChatPage.projectPath,
+                        workspacePath = if (this@BusChatPage.newProjectName.isNotBlank()) "__new__" else this@BusChatPage.projectPath,
                         agents = this@BusChatPage.agents.toList(),
                         agentKey = this@BusChatPage.agentKey,
                         onClose = { this@BusChatPage.sheet = BusChatSheetKind.NONE },
@@ -1673,7 +1716,7 @@ internal class BusChatPage : BasePager() {
                         },
                         onSelectWorkspace = { this@BusChatPage.selectWorkspace(it) },
                         onAddWorkspace = {
-                            this@BusChatPage.showToast("在首页添加项目后再选")
+                            this@BusChatPage.openNewProjectDialog()
                         },
                         onSelectAgent = { this@BusChatPage.selectAgent(it) },
                     )
@@ -1682,6 +1725,31 @@ internal class BusChatPage : BasePager() {
                     palette = palette,
                     text = { this@BusChatPage.toast },
                     bottom = { busChatPx(118f) + this@BusChatPage.keyboardHeight },
+                )
+                DshTextInputDialog(
+                    visible = { this@BusChatPage.showNewProjectDialog },
+                    title = "新建项目",
+                    hint = "文件夹名",
+                    value = { this@BusChatPage.newProjectDraft },
+                    error = { this@BusChatPage.newProjectError },
+                    busy = { false },
+                    confirmLabel = "使用这个项目",
+                    confirmColor = { this@BusChatPage.themeColors.labelPrimary },
+                    onValueChange = {
+                        this@BusChatPage.newProjectDraft = it
+                        if (this@BusChatPage.newProjectError.isNotEmpty()) {
+                            this@BusChatPage.newProjectError = ""
+                        }
+                    },
+                    onCancel = {
+                        this@BusChatPage.showNewProjectDialog = false
+                        this@BusChatPage.newProjectError = ""
+                    },
+                    onConfirm = { this@BusChatPage.submitNewProject() },
+                    pageViewWidth = pageWidth,
+                    verticalOffset = this@BusChatPage.pagerData.statusBarHeight +
+                        this@BusChatPage.pagerData.safeAreaInsets.bottom,
+                    colors = { this@BusChatPage.themeColors },
                 )
                 DshSessionConfirmDialog(
                     visible = { this@BusChatPage.showChatConsent },

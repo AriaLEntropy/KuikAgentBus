@@ -104,6 +104,8 @@ internal data class BusHomeDevice(
     val appVersion: String = "",
     /** 协议 3.8 起：这台电脑声明能把项目移出 BotBus 电脑端列表。 */
     val canRemoveProjects: Boolean = false,
+    /** 协议 2.6：手机新建项目时使用的父目录；空串表示电脑没开这个能力。 */
+    val projectsRoot: String = "",
     /** 协议 3.9 起：这台电脑接受 `restartConnector`（手机上的「重启」）。 */
     val canRestartConnectors: Boolean = false,
 )
@@ -228,6 +230,7 @@ internal fun BusStore.toHomeView(): BusHomeView {
             appVersion = it.string("appVersion").orEmpty(),
             canRemoveProjects = it.string("canRemoveProjects")
                 ?.toBooleanStrictOrNull() == true,
+            projectsRoot = it.string("projectsRoot").orEmpty(),
             canRestartConnectors = it.string("canRestartConnectors")
                 ?.toBooleanStrictOrNull() == true,
         )

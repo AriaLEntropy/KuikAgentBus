@@ -38,6 +38,8 @@ internal data class BusChatStartRequest(
     val source: String,
     val connectorId: String?,
     val projectPath: String,
+    /** FR-8.2：在 projectsRoot 下新建这个文件夹；和 projectPath 二选一 */
+    val newProject: String? = null,
     val prompt: String,
     val model: String,
     val effort: String,
@@ -516,6 +518,7 @@ internal class BusChatSource(
                 request.source,
                 request.connectorId.orEmpty(),
                 request.projectPath,
+                request.newProject.orEmpty(),
                 request.prompt,
                 request.model,
                 request.effort,
@@ -535,6 +538,7 @@ internal class BusChatSource(
                     effort = request.effort,
                     autoApprove = request.autoApprove,
                     attachments = request.attachments,
+                    newProject = request.newProject,
                 )
             },
         ) { result ->

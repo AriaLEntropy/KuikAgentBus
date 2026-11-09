@@ -1105,7 +1105,7 @@ private fun ViewContainer<*, *>.BusChatWorkspaceBody(
         event { click { onAddWorkspace() } }
         Text {
             attr {
-                text("添加工作区")
+                text("新建项目")
                 fontSize(busChatPx(13.5f))
                 fontWeightSemiBold()
                 color(palette.ink2)

@@ -24,6 +24,7 @@ object BusCommands {
         effort: String? = null,
         autoApprove: Boolean? = null,
         attachments: List<BusUploadAttachment> = emptyList(),
+        newProject: String? = null,
     ): String = buildJsonObject {
         put("id", JsonPrimitive(commandId))
         put("createdAt", JsonPrimitive(createdAt))
@@ -32,6 +33,7 @@ object BusCommands {
         put("startTask", buildJsonObject {
             put("source", JsonPrimitive(source))
             if (!connectorId.isNullOrBlank()) put("connectorId", JsonPrimitive(connectorId))
+            if (!newProject.isNullOrBlank()) put("newProject", JsonPrimitive(newProject))
             put("projectPath", JsonPrimitive(projectPath))
             put("prompt", JsonPrimitive(prompt))
             if (!model.isNullOrBlank()) put("model", JsonPrimitive(model))

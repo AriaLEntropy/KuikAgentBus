@@ -579,6 +579,7 @@ internal class DshBusHomePage : BasePager() {
                 put("agentName", agent.name)
                 put("projectPath", project?.path.orEmpty())
                 put("projectName", project?.name.orEmpty())
+                put("projectsRoot", homeView.device?.projectsRoot.orEmpty())
                 put("title", "新建任务")
                 put("model", model)
                 put("effort", effort)
