@@ -4,7 +4,12 @@ import com.kuikagentbus.base.BasePager
 import com.kuikagentbus.base.BridgeModule
 import com.kuikagentbus.protocol.BUS_DELETE_TASK_CONFIRM_MESSAGE
 import com.kuikagentbus.protocol.BUS_DELETE_TASK_CONFIRM_TITLE
+import com.kuikagentbus.protocol.BUS_UPLOAD_MAX_IMAGES
+import com.kuikagentbus.protocol.BusUploadAttachment
 import com.kuikagentbus.protocol.busCanDeleteTask
+import com.kuikagentbus.protocol.busUploadContentTypeAllowed
+import com.kuikagentbus.protocol.busUploadFileTypeAllowed
+import com.kuikagentbus.protocol.busUploadSizeAllowed
 import com.kuikagentbus.data.connection.DshRelayModule
 import com.kuikagentbus.data.message.DshMessage
 import com.kuikagentbus.data.message.DshMessageAttachment
@@ -28,6 +33,8 @@ import com.tencent.kuikly.core.directives.vbind
 import com.tencent.kuikly.core.directives.vforLazy
 import com.tencent.kuikly.core.directives.vif
 import com.tencent.kuikly.core.module.RouterModule
+import com.tencent.kuikly.core.nvi.serialization.json.JSONArray
+import com.tencent.kuikly.core.nvi.serialization.json.JSONObject
 import com.tencent.kuikly.core.reactive.handler.observable
 import com.tencent.kuikly.core.reactive.handler.observableList
 import com.tencent.kuikly.core.timer.setTimeout
@@ -113,6 +120,9 @@ internal class BusChatPage : BasePager() {
     private var deleteError by observable("")
     private var showRemoveConfirm by observable(false)
     private var draft by observable("")
+    /** FR-9.1：还没发出去的图，状态和 artifactId 都在这里 */
+    private val pendingImages by observableList<BusChatPendingImage>()
+    private var pendingImageSeq = 0L
     private var sending by observable(false)
     private var error by observable("")
     private var loading by observable(false)
@@ -446,6 +456,9 @@ internal class BusChatPage : BasePager() {
 
     private fun isReadOnly(): Boolean = taskId.isNotEmpty() && !controllable
 
+    /** FR-9.1：目前只对已知能收图的 acp / dsh 显示图片入口 */
+    private fun attachmentSupported(): Boolean = sourceKind == "acp" || sourceKind == "dsh"
+
     private fun isRunning(): Boolean = status == "running"
 
     private fun canDelete(): Boolean =
@@ -512,17 +525,185 @@ internal class BusChatPage : BasePager() {
         }
     }
 
+    // ---------- FR-9.1 图片附件 ----------
+
+    private fun pickImages(source: String) {
+        val bridge = bridgeModule ?: return
+        if (pendingImages.size >= BUS_UPLOAD_MAX_IMAGES) {
+            showToast("一次最多 $BUS_UPLOAD_MAX_IMAGES 张图片")
+            return
+        }
+        bridge.pickImage(source, compress = true) { raw ->
+            if (!alive) return@pickImage
+            handlePickedImages(raw)
+        }
+    }
+
+    private fun handlePickedImages(raw: String) {
+        val root = runCatching { JSONObject(raw) }.getOrNull() ?: return
+        if (root.optBoolean("cancelled")) return
+        if (!root.optBoolean("ok")) {
+            showToast(root.optString("error").ifBlank { "选择图片失败" })
+            return
+        }
+        val list = root.optJSONArray("images") ?: JSONArray()
+        var added = 0
+        for (index in 0 until list.length()) {
+            if (pendingImages.size >= BUS_UPLOAD_MAX_IMAGES) break
+            val item = list.optJSONObject(index) ?: continue
+            val dataUrl = item.optString("dataUrl")
+            val contentType = item.optString("mediaType")
+            val bytes = item.optString("bytes").toLongOrNull() ?: 0L
+            val width = item.optString("width").toIntOrNull() ?: 0
+            val height = item.optString("height").toIntOrNull() ?: 0
+            if (dataUrl.isEmpty() || contentType.isEmpty()) continue
+            if (!busUploadContentTypeAllowed(contentType)) {
+                showToast("这张图片格式不支持")
+                continue
+            }
+            if (!busUploadSizeAllowed(bytes)) {
+                showToast("图片超过 2 MB")
+                continue
+            }
+            val image = BusChatPendingImage(
+                localId = "img-${++pendingImageSeq}",
+                kind = "image",
+                dataUrl = dataUrl,
+                contentType = contentType,
+                name = item.optString("name").ifBlank { "图片" },
+                size = bytes,
+                width = width,
+                height = height,
+            )
+            pendingImages.add(image)
+            uploadPendingImage(image)
+            added++
+        }
+        if (added == 0 && list.length() == 0) {
+            showToast("没有选到图片")
+        }
+    }
+
+    private fun pickFiles() {
+        val bridge = bridgeModule ?: return
+        if (pendingImages.size >= BUS_UPLOAD_MAX_IMAGES) {
+            showToast("一次最多 $BUS_UPLOAD_MAX_IMAGES 个附件")
+            return
+        }
+        bridge.pickFile { raw ->
+            if (!alive) return@pickFile
+            handlePickedFiles(raw)
+        }
+    }
+
+    private fun handlePickedFiles(raw: String) {
+        val root = runCatching { JSONObject(raw) }.getOrNull() ?: return
+        if (root.optBoolean("cancelled")) return
+        if (!root.optBoolean("ok")) {
+            showToast(root.optString("error").ifBlank { "选择文件失败" })
+            return
+        }
+        val list = root.optJSONArray("files") ?: JSONArray()
+        for (index in 0 until list.length()) {
+            if (pendingImages.size >= BUS_UPLOAD_MAX_IMAGES) break
+            val item = list.optJSONObject(index) ?: continue
+            val dataUrl = item.optString("dataUrl")
+            val contentType = item.optString("mediaType")
+            val name = item.optString("name").ifBlank { "附件" }
+            val bytes = item.optString("bytes").toLongOrNull() ?: 0L
+            if (dataUrl.isEmpty() || contentType.isEmpty()) continue
+            if (!busUploadFileTypeAllowed(contentType)) {
+                showToast("暂不支持 ${name.substringAfterLast('.', "这个文件")} 类型的文件")
+                continue
+            }
+            if (!busUploadSizeAllowed(bytes)) {
+                showToast("$name 超过 2 MB")
+                continue
+            }
+            val pending = BusChatPendingImage(
+                localId = "file-${++pendingImageSeq}",
+                kind = "file",
+                dataUrl = dataUrl,
+                contentType = contentType,
+                name = name,
+                size = bytes,
+                width = 0,
+                height = 0,
+            )
+            pendingImages.add(pending)
+            uploadPendingImage(pending)
+        }
+    }
+
+    private fun uploadPendingImage(image: BusChatPendingImage) {
+        val source = chatSource ?: return
+        updatePendingImage(image.localId) {
+            it.copy(status = BusChatImageStatus.Uploading, error = "")
+        }
+        source.uploadAttachment(image.dataUrl, image.contentType, image.name) { result ->
+            if (!alive) return@uploadAttachment
+            if (result.uploaded) {
+                updatePendingImage(image.localId) {
+                    it.copy(
+                        status = BusChatImageStatus.Ready,
+                        artifactId = result.artifactId,
+                        size = result.size.takeIf { size -> size > 0L } ?: it.size,
+                    )
+                }
+            } else {
+                updatePendingImage(image.localId) {
+                    it.copy(
+                        status = BusChatImageStatus.Failed,
+                        error = busChatUploadFailure(result.state, result.reason),
+                    )
+                }
+            }
+        }
+    }
+
+    private fun updatePendingImage(localId: String, transform: (BusChatPendingImage) -> BusChatPendingImage) {
+        val index = pendingImages.indexOfFirst { it.localId == localId }
+        if (index < 0) return
+        pendingImages[index] = transform(pendingImages[index])
+    }
+
+    private fun removePendingImage(localId: String) {
+        val index = pendingImages.indexOfFirst { it.localId == localId }
+        if (index >= 0) pendingImages.removeAt(index)
+    }
+
+    private fun retryPendingImage(localId: String) {
+        val image = pendingImages.firstOrNull { it.localId == localId } ?: return
+        if (image.status == BusChatImageStatus.Failed) uploadPendingImage(image)
+    }
+
+    private fun clearPendingImages() {
+        pendingImages.clear()
+    }
+
     private fun send() {
         if (sending || isReadOnly()) return
         val text = draft.trim()
-        if (text.isEmpty()) return
+        val images = pendingImages.toList()
+        if (images.any { it.status == BusChatImageStatus.Uploading }) {
+            showToast("附件还在上传")
+            return
+        }
+        if (images.any { it.status != BusChatImageStatus.Ready }) {
+            showToast("有附件上传失败，先重试或移除")
+            return
+        }
+        if (text.isEmpty() && images.isEmpty()) return
+        val attachments = images.map {
+            BusUploadAttachment(it.artifactId, it.contentType, it.size, it.width, it.height)
+        }
         error = ""
         sending = true
         sheet = BusChatSheetKind.NONE
-        if (taskId.isEmpty()) startTask(text) else followUp(text)
+        if (taskId.isEmpty()) startTask(text, attachments) else followUp(text, attachments)
     }
 
-    private fun startTask(prompt: String) {
+    private fun startTask(prompt: String, attachments: List<BusUploadAttachment>) {
         val request = BusChatStartRequest(
             agentId = computerAgentId,
             source = sourceKind,
@@ -534,6 +715,7 @@ internal class BusChatPage : BasePager() {
             autoApprove = stagedAutoApproveValue().takeIf {
                 canAutoApprove && projectPath.isNotBlank()
             },
+            attachments = attachments,
         )
         chatSource?.startTask(request) { id, message ->
             sending = false
@@ -542,11 +724,14 @@ internal class BusChatPage : BasePager() {
                 return@startTask
             }
             taskId = id
-            title = prompt.take(40)
+            title = prompt.take(40).ifBlank {
+                if (attachments.all { it.contentType.startsWith("image/") }) "图片" else "附件"
+            }
             status = "running"
             statusLabel = "运行中"
             controllable = true
             clearDraft()
+            clearPendingImages()
             clearStaged()
             loading = true
             atBottom = true
@@ -555,7 +740,7 @@ internal class BusChatPage : BasePager() {
         }
     }
 
-    private fun followUp(prompt: String) {
+    private fun followUp(prompt: String, attachments: List<BusUploadAttachment>) {
         chatSource?.followUp(
             agentId = computerAgentId,
             taskId = taskId,
@@ -565,6 +750,7 @@ internal class BusChatPage : BasePager() {
             autoApprove = stagedAutoApproveValue().takeIf {
                 canAutoApprove && projectPath.isNotBlank()
             },
+            attachments = attachments,
         ) { ok, message ->
             sending = false
             if (!ok) {
@@ -572,6 +758,7 @@ internal class BusChatPage : BasePager() {
                 return@followUp
             }
             clearDraft()
+            clearPendingImages()
             clearStaged()
             status = "running"
             statusLabel = "运行中"
@@ -1365,6 +1552,9 @@ internal class BusChatPage : BasePager() {
                             },
                             onInputFocusChange = { this@BusChatPage.inputFocused = it },
                             onBackgroundTap = { this@BusChatPage.inputView?.blur() },
+                            pendingImages = { this@BusChatPage.pendingImages.toList() },
+                            onRemovePendingImage = { this@BusChatPage.removePendingImage(it) },
+                            onRetryPendingImage = { this@BusChatPage.retryPendingImage(it) },
                             inputRef = { this@BusChatPage.inputView = it },
                         )
                     vif({ this@BusChatPage.showMenu }) {
@@ -1427,17 +1617,18 @@ internal class BusChatPage : BasePager() {
                         agents = this@BusChatPage.agents.toList(),
                         agentKey = this@BusChatPage.agentKey,
                         onClose = { this@BusChatPage.sheet = BusChatSheetKind.NONE },
+                        showImagePicker = this@BusChatPage.attachmentSupported(),
                         onPickCamera = {
                             this@BusChatPage.sheet = BusChatSheetKind.NONE
-                            this@BusChatPage.showToast("手机端暂不支持在对话里直接添加附件")
+                            this@BusChatPage.pickImages("camera")
                         },
                         onPickGallery = {
                             this@BusChatPage.sheet = BusChatSheetKind.NONE
-                            this@BusChatPage.showToast("手机端暂不支持在对话里直接添加附件")
+                            this@BusChatPage.pickImages("album")
                         },
                         onPickFile = {
                             this@BusChatPage.sheet = BusChatSheetKind.NONE
-                            this@BusChatPage.showToast("手机端暂不支持在对话里直接添加附件")
+                            this@BusChatPage.pickFiles()
                         },
                         onSelectSkill = { this@BusChatPage.selectSkill(it) },
                         onReadSkill = { this@BusChatPage.openSkillContent(it) },

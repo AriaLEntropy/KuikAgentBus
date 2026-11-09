@@ -90,6 +90,9 @@ internal fun ViewContainer<*, *>.BusChatComposer(
     onKeyboardHeightChange: (Float) -> Unit,
     onInputFocusChange: (Boolean) -> Unit,
     onBackgroundTap: () -> Unit,
+    pendingImages: () -> List<BusChatPendingImage>,
+    onRemovePendingImage: (String) -> Unit,
+    onRetryPendingImage: (String) -> Unit,
     inputRef: (InputView) -> Unit,
 ) {
     View {
@@ -112,6 +115,18 @@ internal fun ViewContainer<*, *>.BusChatComposer(
             // 这里不能对 marginBottom 做动画：Kuikly 的布局动画会让画面先动、
             // 原生输入框后动（甚至停在旧位置），输入框的 canvas 与原生 hit target 会错位。
             // 键盘自己已经有上浮动画，输入条直接跳到最终位置，正确性优先。
+        }
+        // FR-9.1 待发送图片：输入框上方的缩略图条；上传/失败状态由列表本身带。
+        // 键只拼 id/状态/错误，不拿整段 base64 做相等比较
+        vbind({
+            pendingImages().joinToString("|") { "${it.localId}:${it.status}:${it.error}" }
+        }) {
+            BusChatImageTray(
+                palette = palette,
+                images = pendingImages(),
+                onRemove = onRemovePendingImage,
+                onRetry = onRetryPendingImage,
+            )
         }
         // 只读说明：贴在芯片行上方，一行灰字，不带图标底盘
         vif({ readOnly() }) {

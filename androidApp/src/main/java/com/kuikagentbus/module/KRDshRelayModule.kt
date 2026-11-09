@@ -102,6 +102,7 @@ internal class KRDshRelayModule : KuiklyRenderBaseModule() {
             val args = runCatching { JSONObject(params ?: "{}") }.getOrNull()
             val raw = args?.optString("dataBase64").orEmpty().substringAfterLast(',')
             val contentType = args?.optString("contentType").orEmpty()
+            val name = args?.optString("name").orEmpty()
             val bytes = runCatching {
                 android.util.Base64.decode(raw, android.util.Base64.DEFAULT)
             }.getOrNull()
@@ -111,7 +112,7 @@ internal class KRDshRelayModule : KuiklyRenderBaseModule() {
                 val random = ByteArray(BUS_UPLOAD_ID_BYTES).also { SecureRandom().nextBytes(it) }
                 val artifactId = busBase64Url(random)
                 thread(name = "agent-host-upload") {
-                    val payload = when (val result = AgentHostBus.uploadArtifact(artifactId, contentType, bytes)) {
+                    val payload = when (val result = AgentHostBus.uploadArtifact(artifactId, contentType, bytes, name)) {
                         is ArtifactUpload.Uploaded -> mapOf(
                             "state" to "uploaded",
                             "artifactId" to result.artifactId,

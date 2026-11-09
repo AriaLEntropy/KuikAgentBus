@@ -24,8 +24,28 @@ const val BUS_UPLOAD_MAX_IMAGES = 4
 /** 宿主 `ALLOWED_UPLOAD_TYPES` 的四项，多一个都不传 */
 val BUS_UPLOAD_CONTENT_TYPES = setOf("image/png", "image/jpeg", "image/gif", "image/webp")
 
-/** 类型不在那四项里就别发，415 留给实现真的对不上时 */
+/** 宿主 `ALLOWED_UPLOAD_FILE_TYPES` 的文档名单；普通文件附件按它提前拦 */
+val BUS_UPLOAD_FILE_TYPES = setOf(
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "text/plain",
+    "text/markdown",
+    "text/csv",
+    "text/tab-separated-values",
+    "application/json",
+    "application/zip",
+)
+
+/** 图片类型不在那四项里就别发，415 留给实现真的对不上时 */
 fun busUploadContentTypeAllowed(contentType: String): Boolean = contentType in BUS_UPLOAD_CONTENT_TYPES
+
+/** 普通文件类型不在文档名单里就提前拦下；文件还必须带原文件名 */
+fun busUploadFileTypeAllowed(contentType: String): Boolean = contentType in BUS_UPLOAD_FILE_TYPES
 
 /** 上限含 2 MiB 整，超一个字节就会被电脑回 413 */
 fun busUploadSizeAllowed(bytes: Long): Boolean = bytes in 0..BUS_UPLOAD_MAX_BYTES

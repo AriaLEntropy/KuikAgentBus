@@ -129,6 +129,7 @@ internal fun ViewContainer<*, *>.BusChatSheetHost(
     agents: List<BusChatAgentOption>,
     agentKey: String,
     onClose: () -> Unit,
+    showImagePicker: Boolean,
     onPickCamera: () -> Unit,
     onPickGallery: () -> Unit,
     onPickFile: () -> Unit,
@@ -237,17 +238,19 @@ internal fun ViewContainer<*, *>.BusChatSheetHost(
                     }
                     when (kind) {
                         BusChatSheetKind.ATTACH -> {
-                            BusChatAttachTiles(
-                                palette = palette,
-                                width = bodyWidth,
-                                onPickCamera = onPickCamera,
-                                onPickGallery = onPickGallery,
-                                onPickFile = onPickFile,
-                            )
-                            View {
-                                attr {
-                                    width(bodyWidth)
-                                    height(SHEET_TILE_GAP)
+                            if (showImagePicker) {
+                                BusChatAttachTiles(
+                                    palette = palette,
+                                    width = bodyWidth,
+                                    onPickCamera = onPickCamera,
+                                    onPickGallery = onPickGallery,
+                                    onPickFile = onPickFile,
+                                )
+                                View {
+                                    attr {
+                                        width(bodyWidth)
+                                        height(SHEET_TILE_GAP)
+                                    }
                                 }
                             }
                             BusChatSkillList(
@@ -407,7 +410,7 @@ private fun busChatSheetTitle(
 
 // ---------- 附件 ----------
 
-/** 拍照 / 照片 / 文件：三块等宽 tile，间距 10 */
+/** 拍照 / 照片 / 文件：三块等宽 tile，间距 10；文件按普通附件交给 Agent 读 */
 private fun ViewContainer<*, *>.BusChatAttachTiles(
     palette: BusChatPalette,
     width: Float,

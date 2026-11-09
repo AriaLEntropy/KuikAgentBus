@@ -482,6 +482,36 @@ internal const val BUS_CHAT_FILE_DOWNLOADING = "正在下载到本机"
 internal const val BUS_CHAT_FILE_TIMEOUT = "获取超时，请稍后再试"
 internal const val BUS_CHAT_FILE_NO_HANDLER = "这台手机上没有能打开它的应用"
 
+// ---------- FR-9.1 待发送图片 ----------
+
+internal enum class BusChatImageStatus { Uploading, Ready, Failed }
+
+/** 选完还没发出去的一张图；uploaded 之后 artifactId 才有效 */
+internal data class BusChatPendingImage(
+    val localId: String,
+    /** image / file：图片走压缩和缩略图，文件按普通附件上传并交给 Agent 读 */
+    val kind: String = "image",
+    val dataUrl: String,
+    val contentType: String,
+    val name: String,
+    val size: Long,
+    val width: Int,
+    val height: Int,
+    val status: BusChatImageStatus = BusChatImageStatus.Uploading,
+    val artifactId: String = "",
+    val error: String = "",
+)
+
+/** 上传失败的原生 reason → 缩略图上的那句话 */
+internal fun busChatUploadFailure(state: String, reason: String): String = when {
+    state == "offline" -> "电脑离线，稍后再试"
+    reason == "too_large" -> "图片超过 2 MB"
+    reason == "unsupported_media_type" -> "这个附件格式不支持"
+    reason == "invalid_artifact_id" -> "上传失败，请重试"
+    reason == "invalid_filename" -> "文件名无效，请重试"
+    else -> "上传失败，请重试"
+}
+
 /** 卡片状态的键：同一条消息里可能提到两个同名文件，所以带上消息 id */
 internal fun busChatFileKey(messageId: String, path: String): String = "$messageId|$path"
 

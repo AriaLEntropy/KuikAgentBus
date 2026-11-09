@@ -157,10 +157,16 @@ class DshRelayModule : Module() {
      * 字节由原生层负责 PUT 到 `/bus/uploads/:id`，id 也在那边生成（16 随机字节的 base64url）；
      * 这里只送 base64 文本与类型，回 artifactId 给上层拼进 attachments
      */
-    fun busUploadArtifact(dataBase64: String, contentType: String, onResult: (DshBusUploadResult) -> Unit) {
+    fun busUploadArtifact(
+        dataBase64: String,
+        contentType: String,
+        name: String = "",
+        onResult: (DshBusUploadResult) -> Unit,
+    ) {
         val params = JSONObject().apply {
             put("dataBase64", dataBase64)
             put("contentType", contentType)
+            if (name.isNotBlank()) put("name", name)
         }
         toNative(true, "busUploadArtifact", params.toString(), { value ->
             onResult(

@@ -8,7 +8,10 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.Manifest
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Paint
 import android.net.Uri
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -30,6 +33,7 @@ import com.tencent.kuikly.core.render.android.export.KuiklyRenderBaseModule
 import com.tencent.kuikly.core.render.android.export.KuiklyRenderCallback
 import com.kuikagentbus.BuildConfig
 import com.kuikagentbus.KRApplication
+import com.kuikagentbus.protocol.BUS_UPLOAD_MAX_BYTES
 import com.kuikagentbus.ssh.DshSshForegroundService
 import com.kuikagentbus.ssh.DshSshKeyStore
 import org.json.JSONArray
@@ -43,6 +47,7 @@ class KRBridgeModule : KuiklyRenderBaseModule() {
     private var navigationBarContrastBeforeDim: Boolean? = null
     private var sshKeyCallback: KuiklyRenderCallback? = null
     private var pickImageCallback: KuiklyRenderCallback? = null
+    private var pickImageCompress = false
     private var pickFileCallback: KuiklyRenderCallback? = null
     private var pendingCameraFile: File? = null
     // ===== 语音识别（按住说话）=====
@@ -524,7 +529,9 @@ class KRBridgeModule : KuiklyRenderBaseModule() {
     }
 
     private fun pickImage(params: String?, callback: KuiklyRenderCallback?) {
-        val source = JSONObject(params ?: "{}").optString("source", "album")
+        val args = JSONObject(params ?: "{}")
+        val source = args.optString("source", "album")
+        pickImageCompress = args.optBoolean("compress")
         pickImageCallback = callback
         val intent: Intent
         val requestCode: Int
@@ -582,6 +589,7 @@ class KRBridgeModule : KuiklyRenderBaseModule() {
         } catch (t: Throwable) {
         }
         pickImageCallback = null
+        pickImageCompress = false
         pendingCameraFile = null
     }
 
@@ -622,34 +630,126 @@ class KRBridgeModule : KuiklyRenderBaseModule() {
         return Triple(options.outMimeType, options.outWidth, options.outHeight)
     }
 
-    private fun deliverPickedImages(images: List<Pair<ByteArray?, String>>) {
+    private fun deliverPickedImages(images: List<Pair<ByteArray?, String>>, compress: Boolean = false) {
+        if (!compress) {
+            finishPickImage(buildPickedImagesPayload(images, false))
+            return
+        }
+        // 12 MP 照片解码 + 逐级压缩放到后台线程，避免卡住 onActivityResult 的主线程
+        Thread({
+            val payload = buildPickedImagesPayload(images, true)
+            activity?.runOnUiThread { finishPickImage(payload) }
+        }, "chat-image-compress").start()
+    }
+
+    private fun deliverPickedImage(bytes: ByteArray?, displayName: String, compress: Boolean) =
+        deliverPickedImages(listOf(bytes to displayName), compress)
+
+    private fun buildPickedImagesPayload(
+        images: List<Pair<ByteArray?, String>>,
+        compress: Boolean,
+    ): Map<String, Any?> {
         val entries = mutableListOf<Map<String, Any?>>()
         for ((bytes, displayName) in images) {
             if (bytes == null || bytes.isEmpty()) continue
             val (mime, width, height) = decodeImageMeta(bytes)
             if (mime.isNullOrEmpty() || width <= 0 || height <= 0) continue
-            val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+            var outBytes = bytes
+            var outMime = mime
+            var outWidth = width
+            var outHeight = height
+            if (compress) {
+                val compressed = compressForUpload(bytes)
+                    ?: return mapOf("ok" to false, "error" to "图片压缩失败")
+                outBytes = compressed.bytes
+                outMime = compressed.contentType
+                outWidth = compressed.width
+                outHeight = compressed.height
+            }
+            val base64 = Base64.encodeToString(outBytes, Base64.NO_WRAP)
             entries.add(
                 mapOf(
-                    "dataUrl" to "data:$mime;base64,$base64",
-                    "mediaType" to mime,
+                    "dataUrl" to "data:$outMime;base64,$base64",
+                    "mediaType" to outMime,
                     "name" to displayName,
-                    "bytes" to bytes.size.toString(),
-                    "width" to width.toString(),
-                    "height" to height.toString(),
+                    "bytes" to outBytes.size.toString(),
+                    "width" to outWidth.toString(),
+                    "height" to outHeight.toString(),
                 )
             )
         }
         if (entries.isEmpty()) {
-            finishPickImage(mapOf("ok" to false, "error" to "无法读取图片数据"))
-            return
+            return mapOf("ok" to false, "error" to "无法读取图片数据")
         }
-        Log.i("HRBridgePick", "picked ${entries.size} image(s)")
-        finishPickImage(mapOf("ok" to true, "images" to entries))
+        Log.i("HRBridgePick", "picked ${entries.size} image(s) compress=$compress")
+        return mapOf("ok" to true, "images" to entries)
     }
 
-    private fun deliverPickedImage(bytes: ByteArray?, displayName: String) =
-        deliverPickedImages(listOf(bytes to displayName))
+    private data class CompressedImage(
+        val bytes: ByteArray,
+        val contentType: String,
+        val width: Int,
+        val height: Int,
+    )
+
+    /**
+     * FR-9.1 压缩：长边 ≤ 2048，白底转 JPEG，质量从 90 逐级降到 30；
+     * 还不够就按 0.8 缩尺寸再试，直到 ≤ 2 MiB（阶段一隧道请求上限）
+     */
+    private fun compressForUpload(source: ByteArray): CompressedImage? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(source, 0, source.size, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        var sample = 1
+        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 2048) {
+            sample *= 2
+        }
+        val decoded = BitmapFactory.decodeByteArray(
+            source,
+            0,
+            source.size,
+            BitmapFactory.Options().apply {
+                inSampleSize = sample
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            },
+        ) ?: return null
+        try {
+            val baseScale = (2048f / maxOf(decoded.width, decoded.height)).coerceAtMost(1f)
+            var scale = baseScale
+            while (scale >= 0.3f) {
+                val width = (decoded.width * scale).toInt().coerceAtLeast(1)
+                val height = (decoded.height * scale).toInt().coerceAtLeast(1)
+                val scaled = if (scale == 1f) {
+                    decoded
+                } else {
+                    Bitmap.createScaledBitmap(decoded, width, height, true)
+                }
+                val canvasBitmap = Bitmap.createBitmap(scaled.width, scaled.height, Bitmap.Config.ARGB_8888)
+                try {
+                    val canvas = Canvas(canvasBitmap)
+                    canvas.drawColor(Color.WHITE)
+                    canvas.drawBitmap(scaled, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG))
+                    var quality = 90
+                    while (quality >= 30) {
+                        val out = java.io.ByteArrayOutputStream()
+                        canvasBitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)
+                        val data = out.toByteArray()
+                        if (data.size <= BUS_UPLOAD_MAX_BYTES) {
+                            return CompressedImage(data, "image/jpeg", canvasBitmap.width, canvasBitmap.height)
+                        }
+                        quality -= 10
+                    }
+                } finally {
+                    if (scaled !== decoded) scaled.recycle()
+                    canvasBitmap.recycle()
+                }
+                scale *= 0.8f
+            }
+        } finally {
+            decoded.recycle()
+        }
+        return null
+    }
 
     // ===== 通用文件选择（文档选择器）=====
     private fun pickFile(callback: KuiklyRenderCallback?) {
@@ -1100,10 +1200,13 @@ class KRBridgeModule : KuiklyRenderBaseModule() {
                     finishPickImage(mapOf("ok" to false, "cancelled" to true))
                     return
                 }
-                deliverPickedImages(uris.map { uri ->
-                    val bytes = (readPickedBytes(uri, MAX_PICK_FILE_BYTES) as? PickedBytesResult.Ok)?.bytes
-                    bytes to queryDisplayName(uri)
-                })
+                deliverPickedImages(
+                    uris.map { uri ->
+                        val bytes = (readPickedBytes(uri, MAX_PICK_FILE_BYTES) as? PickedBytesResult.Ok)?.bytes
+                        bytes to queryDisplayName(uri)
+                    },
+                    pickImageCompress,
+                )
             }
 
             REQUEST_PICK_FILE -> {
@@ -1138,7 +1241,7 @@ class KRBridgeModule : KuiklyRenderBaseModule() {
                 val name = file.name
                 file.delete()
                 pendingCameraFile = null
-                deliverPickedImage(bytes, name)
+                deliverPickedImage(bytes, name, pickImageCompress)
             }
         }
     }

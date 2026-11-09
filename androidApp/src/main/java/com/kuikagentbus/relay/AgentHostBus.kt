@@ -1,5 +1,6 @@
 package com.kuikagentbus.relay
 
+import android.net.Uri
 import android.util.Log
 import com.kuikagentbus.protocol.BusChannel
 import com.kuikagentbus.protocol.BusArtifactEntry
@@ -8,6 +9,7 @@ import com.kuikagentbus.protocol.busArtifactEviction
 import com.kuikagentbus.protocol.busArtifactFileName
 import com.kuikagentbus.protocol.busArtifactIdUsable
 import com.kuikagentbus.protocol.busUploadContentTypeAllowed
+import com.kuikagentbus.protocol.busUploadFileTypeAllowed
 import com.kuikagentbus.protocol.busUploadSizeAllowed
 import com.kuikagentbus.protocol.BusSync
 import com.kuikagentbus.protocol.DescribeAttempts
@@ -419,20 +421,32 @@ internal object AgentHostBus {
      * 类型、大小和 id 三道闸门都复用 shared 里的同一套规则，客户端先挡一遍，
      * 电脑回的 413/415/400 再兜一遍，两边不会各写一份口径
      */
-    fun uploadArtifact(artifactId: String, contentType: String, bytes: ByteArray): ArtifactUpload {
+    fun uploadArtifact(
+        artifactId: String,
+        contentType: String,
+        bytes: ByteArray,
+        name: String = "",
+    ): ArtifactUpload {
         if (!busArtifactIdUsable(artifactId)) return ArtifactUpload.Rejected("invalid_artifact_id")
-        if (!busUploadContentTypeAllowed(contentType)) return ArtifactUpload.Rejected("unsupported_media_type")
+        val isImage = busUploadContentTypeAllowed(contentType)
+        if (!isImage && !busUploadFileTypeAllowed(contentType)) {
+            return ArtifactUpload.Rejected("unsupported_media_type")
+        }
+        if (!isImage && name.isBlank()) return ArtifactUpload.Rejected("invalid_filename")
         if (!busUploadSizeAllowed(bytes.size.toLong())) return ArtifactUpload.Rejected("too_large")
         val port = commandPort
         val token = commandToken
         if (port <= 0 || token.isEmpty()) return ArtifactUpload.Offline
 
         val client = OkHttpClient.Builder().callTimeout(30, TimeUnit.SECONDS).build()
-        val request = Request.Builder()
+        val requestBuilder = Request.Builder()
             .url("http://127.0.0.1:$port/bus/uploads/$artifactId")
             .header("Authorization", "Bearer $token")
             .put(bytes.toRequestBody(contentType.toMediaType()))
-            .build()
+        if (name.isNotBlank()) {
+            requestBuilder.header("x-bus-filename", Uri.encode(name))
+        }
+        val request = requestBuilder.build()
         return runCatching {
             client.newCall(request).execute().use { response ->
                 when (response.code) {

@@ -410,12 +410,21 @@ class BridgeModule : Module() {
     }
     /**
      * 平台取图（相册/拍照）。回调返回 JSON 字符串：
-     * 成功 {"ok":true,"dataUrl":"data:image/png;base64,...","mediaType":"image/png","name":"x.jpg","bytes":123,"width":100,"height":80}
+     * 成功 {"ok":true,"images":[{"dataUrl":"data:image/jpeg;base64,...","mediaType":"image/jpeg","name":"x.jpg","bytes":123,"width":100,"height":80}]}
      * 取消 {"ok":false,"cancelled":true}
      * 失败 {"ok":false,"error":"可读原因"}
+     *
+     * [compress] 为 true 时原生按 FR-9.1 压到长边 2048、JPEG 逐级降质直到 ≤2 MiB；
+     * 只给聊天附件用，其他取图场景不要开，避免无谓转码。
      */
-    fun pickImage(source: String, callback: (String) -> Unit) {
-        callNativeMethod("pickImage", JSONObject().apply { put("source", source) }) { value ->
+    fun pickImage(source: String, compress: Boolean = false, callback: (String) -> Unit) {
+        callNativeMethod(
+            "pickImage",
+            JSONObject().apply {
+                put("source", source)
+                put("compress", compress)
+            },
+        ) { value ->
             callback(value?.toString().orEmpty())
         }
     }

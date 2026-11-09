@@ -7,8 +7,10 @@ import com.kuikagentbus.protocol.BusCommandTransport
 import com.kuikagentbus.protocol.BusCommands
 import com.kuikagentbus.protocol.BusSendResult
 import com.kuikagentbus.protocol.BusStore
+import com.kuikagentbus.protocol.BusUploadAttachment
 import com.kuikagentbus.protocol.busParse
 import com.kuikagentbus.protocol.busSkillListKey
+import com.kuikagentbus.data.connection.DshBusUploadResult
 import com.kuikagentbus.data.connection.DshRelayModule
 import com.kuikagentbus.data.message.DshMessage
 import com.kuikagentbus.data.message.DshMessageRole
@@ -41,6 +43,8 @@ internal data class BusChatStartRequest(
     val effort: String,
     /** 协议 3.3：随首轮 startTask 发出；null = 不动电脑上的项目设置 */
     val autoApprove: Boolean? = null,
+    /** FR-9.1：已经上传完的图片，只有 artifactId 在电脑上有效 */
+    val attachments: List<BusUploadAttachment> = emptyList(),
 )
 
 /** 一条挂起的审批/提问：标题、细节与命令 id 都从任务快照投影 */
@@ -155,7 +159,16 @@ internal interface ConversationSource {
         model: String,
         effort: String,
         autoApprove: Boolean?,
+        attachments: List<BusUploadAttachment> = emptyList(),
         onDone: (ok: Boolean, error: String) -> Unit,
+    )
+
+    /** FR-9.1：先把附件字节传到电脑，再拿回来的 artifactId 拼进命令的 attachments */
+    fun uploadAttachment(
+        dataUrl: String,
+        contentType: String,
+        name: String,
+        onDone: (DshBusUploadResult) -> Unit,
     )
     fun interrupt(agentId: String, taskId: String, onDone: (ok: Boolean, error: String) -> Unit)
 
@@ -506,6 +519,7 @@ internal class BusChatSource(
                 request.model,
                 request.effort,
                 request.autoApprove?.toString().orEmpty(),
+                request.attachments.joinToString(",") { it.artifactId },
             ).joinToString("|"),
             build = { id, createdAt ->
                 BusCommands.startTask(
@@ -519,6 +533,7 @@ internal class BusChatSource(
                     model = request.model,
                     effort = request.effort,
                     autoApprove = request.autoApprove,
+                    attachments = request.attachments,
                 )
             },
         ) { result ->
@@ -541,6 +556,7 @@ internal class BusChatSource(
         model: String,
         effort: String,
         autoApprove: Boolean?,
+        attachments: List<BusUploadAttachment>,
         onDone: (ok: Boolean, error: String) -> Unit,
     ) {
         sendCommand(
@@ -552,6 +568,7 @@ internal class BusChatSource(
                 model,
                 effort,
                 autoApprove?.toString().orEmpty(),
+                attachments.joinToString(",") { it.artifactId },
             ).joinToString("|"),
             build = { id, createdAt ->
                 BusCommands.followUp(
@@ -563,6 +580,7 @@ internal class BusChatSource(
                     model = model,
                     effort = effort,
                     autoApprove = autoApprove,
+                    attachments = attachments,
                 )
             },
         ) { result ->
@@ -609,6 +627,15 @@ internal class BusChatSource(
                 else -> onDone(false, result.message)
             }
         }
+    }
+
+    override fun uploadAttachment(
+        dataUrl: String,
+        contentType: String,
+        name: String,
+        onDone: (DshBusUploadResult) -> Unit,
+    ) {
+        relay.busUploadArtifact(dataUrl, contentType, name, onDone)
     }
 
     override fun interrupt(agentId: String, taskId: String, onDone: (ok: Boolean, error: String) -> Unit) {

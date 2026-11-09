@@ -58,6 +58,20 @@ class BusUploadTest {
     }
 
     @Test
+    fun fileGateAllowsDocumentsButNotImagesOrExecutables() {
+        assertTrue(busUploadFileTypeAllowed("application/pdf"))
+        assertTrue(
+            busUploadFileTypeAllowed(
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ),
+        )
+        assertTrue(busUploadFileTypeAllowed("text/markdown"))
+        assertFalse(busUploadFileTypeAllowed("image/png"))
+        assertFalse(busUploadFileTypeAllowed("application/x-msdownload"))
+        assertFalse(busUploadFileTypeAllowed(""))
+    }
+
+    @Test
     fun sizeGateKeepsTheTwoMiBTopInclusive() {
         assertTrue(busUploadSizeAllowed(BUS_UPLOAD_MAX_BYTES))
         assertFalse(busUploadSizeAllowed(BUS_UPLOAD_MAX_BYTES + 1))
