@@ -512,6 +512,20 @@ internal fun busChatUploadFailure(state: String, reason: String): String = when 
     else -> "上传失败，请重试"
 }
 
+/** FR-8.2：本地校验新建项目名；返回 null 表示可以发。 */
+internal fun busChatNewProjectError(name: String, knownNames: List<String>): String? {
+    val trimmed = name.trim()
+    return when {
+        trimmed.isEmpty() -> "请输入文件夹名"
+        trimmed.length > 80 -> "文件夹名最多 80 个字"
+        trimmed.startsWith(".") -> "文件夹名不能以 . 开头"
+        trimmed.any { it.code < 0x20 } -> "文件夹名不能包含控制字符"
+        trimmed.any { it == '/' || it == '\\' || it == ':' } -> "文件夹名不能包含 / \\ :"
+        knownNames.any { it.equals(trimmed, ignoreCase = true) } -> "已经有同名项目"
+        else -> null
+    }
+}
+
 /** 卡片状态的键：同一条消息里可能提到两个同名文件，所以带上消息 id */
 internal fun busChatFileKey(messageId: String, path: String): String = "$messageId|$path"
 
