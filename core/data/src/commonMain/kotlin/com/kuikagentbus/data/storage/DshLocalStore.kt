@@ -35,6 +35,10 @@ interface DshLocalStore {
     fun saveBusCache(scopeId: String, value: String) = Unit
     fun clearBusCache(scopeId: String) = Unit
 
+    /** 通用小设置，给“上次用的 Agent”“首次授权已确认”这类本机偏好用。 */
+    fun loadSetting(key: String): String? = null
+    fun saveSetting(key: String, value: String) = Unit
+
     /**
      * 永久删除一个会话及其所有消息。
      * 与 archive 不同，此操作不可恢复。

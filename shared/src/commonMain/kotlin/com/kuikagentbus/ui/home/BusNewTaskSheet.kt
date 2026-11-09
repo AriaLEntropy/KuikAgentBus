@@ -157,7 +157,7 @@ internal fun ViewContainer<*, *>.BusNewTaskSheet(
                         flexWrap(FlexWrap.WRAP)
                     }
                     NewTaskChip(
-                        label = "默认目录",
+                        label = "不在项目中",
                         selected = { selectedProjectPath().isEmpty() },
                         colors = colors,
                         onClick = { onSelectProject("") },

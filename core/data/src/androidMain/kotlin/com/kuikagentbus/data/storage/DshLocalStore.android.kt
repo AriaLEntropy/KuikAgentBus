@@ -103,6 +103,15 @@ private class DshSqliteStore(path: String, legacyProfile: DshLegacyRemoteProfile
         "DELETE FROM dsh_bus_cache WHERE scope_id = ?", listOf(scopeId),
     )
 
+    override fun loadSetting(key: String): String? = queryOne(
+        "SELECT value FROM dsh_settings WHERE key = ?", listOf(key),
+    ) { it.getColumnString(0) }
+
+    override fun saveSetting(key: String, value: String) = execute(
+        "INSERT OR REPLACE INTO dsh_settings (key, value) VALUES (?, ?)",
+        listOf(key, value),
+    )
+
     override fun migrateLegacyRemoteProfile(profile: DshLegacyRemoteProfile): Boolean {
         if (queryOne("SELECT value FROM dsh_settings WHERE key = ?", listOf("remote_profile_migration_done")) { it.getColumnString(0) } == "true") return false
         driver.transaction {

@@ -527,6 +527,7 @@ internal class DshBusHomePage : BasePager() {
                 put("taskId", task.id)
                 put("agentId", device.agentId)
                 put("hostName", device.name)
+                put("databaseDir", databaseDir)
                 put("source", task.source)
                 put("connectorId", task.connectorId.orEmpty())
                 put("agentKey", task.agentKey)
@@ -556,8 +557,10 @@ internal class DshBusHomePage : BasePager() {
     private fun openDraftChat() {
         val device = homeView.device ?: return
         val agents = startableAgents()
+        val lastAgentKey = homeView.tasks.maxByOrNull { it.updatedAt }?.agentKey
         val agent = selectedAgentKeys.singleOrNull()
             ?.let { key -> agents.firstOrNull { it.key == key } }
+            ?: agents.firstOrNull { it.key == lastAgentKey }
             ?: agents.firstOrNull()
             ?: return
         val project = homeView.projects.firstOrNull()
@@ -569,6 +572,7 @@ internal class DshBusHomePage : BasePager() {
                 put("taskId", "")
                 put("agentId", device.agentId)
                 put("hostName", device.name)
+                put("databaseDir", databaseDir)
                 put("source", agent.source)
                 put("connectorId", agent.connectorId.orEmpty())
                 put("agentKey", agent.key)

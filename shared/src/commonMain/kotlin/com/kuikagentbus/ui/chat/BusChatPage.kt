@@ -14,6 +14,8 @@ import com.kuikagentbus.data.connection.DshRelayModule
 import com.kuikagentbus.data.message.DshMessage
 import com.kuikagentbus.data.message.DshMessageAttachment
 import com.kuikagentbus.data.message.DshMessageFileRef
+import com.kuikagentbus.data.storage.DshLocalStore
+import com.kuikagentbus.data.storage.createDshLocalStore
 import com.kuikagentbus.platform.currentTimeMillis
 import com.kuikagentbus.theme.DshColorTokens
 import com.kuikagentbus.ui.dshTopInset
@@ -141,6 +143,9 @@ internal class BusChatPage : BasePager() {
     private var answerSelection by observable<Map<String, List<String>>>(emptyMap())
     private var showAutoApproveConfirm by observable(false)
     private var autoApproveExplained = false
+    /** FR-8.5：首次对这台电脑上的这个 Agent 发任务前要确认一次 */
+    private var showChatConsent by observable(false)
+    private var store: DshLocalStore? = null
     /** 草稿态的 chips 只有用户主动选过才回显名字 */
     private var workspacePicked by observable(false)
     private var agentPicked by observable(false)
@@ -210,6 +215,7 @@ internal class BusChatPage : BasePager() {
                 when {
                     // 产物整页在最上层，返回先关它
                     showArtifacts -> showArtifacts = false
+                    showChatConsent -> showChatConsent = false
                     showAutoApproveConfirm -> showAutoApproveConfirm = false
                     showRemoveConfirm -> showRemoveConfirm = false
                     showDeleteConfirm -> showDeleteConfirm = false
@@ -232,6 +238,12 @@ internal class BusChatPage : BasePager() {
         agentKey = params.optString("agentKey")
         agentName = params.optString("agentName")
         hostName = params.optString("hostName")
+        val databaseDir = params.optString("databaseDir")
+        store = if (databaseDir.isBlank()) {
+            null
+        } else {
+            runCatching { createDshLocalStore("$databaseDir/dsh.db", null) }.getOrNull()
+        }
         projectPath = params.optString("projectPath")
         projectName = params.optString("projectName")
         modelId = params.optString("model")
@@ -261,6 +273,11 @@ internal class BusChatPage : BasePager() {
         source.models(agentKey).let { list ->
             models.clear()
             models.addAll(list)
+        }
+        if (taskId.isEmpty()) {
+            // 新建任务的默认项目 / Agent 直接显示成已选中，不让用户以为还没选
+            agentPicked = agentKey.isNotBlank()
+            workspacePicked = projectPath.isNotBlank()
         }
         skills.clear()
         workspaces.clear()
@@ -311,7 +328,8 @@ internal class BusChatPage : BasePager() {
 
     /** 全屏浮层（对话框 / 底部面板）出现时，把系统导航栏一起压暗，避免遮罩在底部断一条亮带 */
     private fun overlayVisible(): Boolean =
-        showAutoApproveConfirm ||
+        showChatConsent ||
+            showAutoApproveConfirm ||
             showRemoveConfirm ||
             showDeleteConfirm ||
             sheet != BusChatSheetKind.NONE
@@ -329,7 +347,7 @@ internal class BusChatPage : BasePager() {
      * 确认弹窗用遮罩结果色；底部面板直接用面板底色，让面板看起来一直铺到屏幕底，不露背景条
      */
     private fun overlayDimColor(): Long {
-        val dialogOnTop = showAutoApproveConfirm || showRemoveConfirm || showDeleteConfirm
+        val dialogOnTop = showChatConsent || showAutoApproveConfirm || showRemoveConfirm || showDeleteConfirm
         if (dialogOnTop) {
             return if (themeColors.isDark) 0xFF0D0D0EL else 0xFF929296L
         }
@@ -440,7 +458,7 @@ internal class BusChatPage : BasePager() {
     }
 
     private fun workspaceLabel(): String =
-        projectName.ifBlank { projectPath.substringAfterLast('/') }
+        if (projectPath.isBlank()) "不在项目中" else projectName.ifBlank { projectPath.substringAfterLast('/') }
 
     private fun avatarAsset(): String = BusAgentVisuals.assetFor(
         source = sourceKind,
@@ -697,10 +715,23 @@ internal class BusChatPage : BasePager() {
         val attachments = images.map {
             BusUploadAttachment(it.artifactId, it.contentType, it.size, it.width, it.height)
         }
+        if (!hasChatConsent()) {
+            showChatConsent = true
+            return
+        }
         error = ""
         sending = true
         sheet = BusChatSheetKind.NONE
         if (taskId.isEmpty()) startTask(text, attachments) else followUp(text, attachments)
+    }
+
+    private fun chatConsentKey(): String = "bus_chat_consent_${computerAgentId}_${agentKey}"
+
+    private fun hasChatConsent(): Boolean =
+        store == null || store?.loadSetting(chatConsentKey()) == "true"
+
+    private fun rememberChatConsent() {
+        store?.saveSetting(chatConsentKey(), "true")
     }
 
     private fun startTask(prompt: String, attachments: List<BusUploadAttachment>) {
@@ -1651,6 +1682,26 @@ internal class BusChatPage : BasePager() {
                     palette = palette,
                     text = { this@BusChatPage.toast },
                     bottom = { busChatPx(118f) + this@BusChatPage.keyboardHeight },
+                )
+                DshSessionConfirmDialog(
+                    visible = { this@BusChatPage.showChatConsent },
+                    title = "发起任务",
+                    message = "请求会由电脑上的 ${this@BusChatPage.agentName.ifBlank { "Agent" }} 发给它的模型服务商。这一段不在端到端加密范围内。继续后，这台电脑上的这个 Agent 不再提示。",
+                    busyLabel = "",
+                    confirmLabel = "继续",
+                    confirmColor = { this@BusChatPage.themeColors.labelPrimary },
+                    busy = { false },
+                    error = { "" },
+                    onCancel = { this@BusChatPage.showChatConsent = false },
+                    onConfirm = {
+                        this@BusChatPage.showChatConsent = false
+                        this@BusChatPage.rememberChatConsent()
+                        this@BusChatPage.send()
+                    },
+                    pageViewWidth = pageWidth,
+                    verticalOffset = this@BusChatPage.pagerData.statusBarHeight +
+                        this@BusChatPage.pagerData.safeAreaInsets.bottom,
+                    colors = { this@BusChatPage.themeColors },
                 )
                 DshSessionConfirmDialog(
                     visible = { this@BusChatPage.showAutoApproveConfirm },

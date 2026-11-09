@@ -444,7 +444,8 @@ internal class BusChatSource(
     }
 
     override fun workspaces(): List<BusChatWorkspace> =
-        homeView()?.projects.orEmpty().map { BusChatWorkspace(path = it.path, name = it.name) }
+        homeView()?.projects.orEmpty().map { BusChatWorkspace(path = it.path, name = it.name) } +
+            BusChatWorkspace(path = "", name = "不在项目中")
 
     override fun artifacts(taskId: String): List<BusChatArtifact> {
         val raw = runCatching { relay.busHomeJson() }.getOrNull() ?: return emptyList()
