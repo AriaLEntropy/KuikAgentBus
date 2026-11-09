@@ -17,6 +17,9 @@ interface DshLocalStore {
     fun loadRelayProfile(): DshRelayProfile?
     fun saveRelayProfile(profile: DshRelayProfile)
     fun clearRelayProfile()
+    /** FR-3.5：一台手机可以保存多台电脑的配对记录；默认实现保留旧的单条语义。 */
+    fun loadRelayProfiles(): List<DshRelayProfile> = listOfNotNull(loadRelayProfile())
+    fun clearRelayProfile(hostId: String) = clearRelayProfile()
     fun migrateLegacyRemoteProfile(profile: DshLegacyRemoteProfile): Boolean
     fun clearLegacyRemotePreferenceKeys() = Unit
 

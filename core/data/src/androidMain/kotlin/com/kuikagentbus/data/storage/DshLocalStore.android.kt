@@ -71,24 +71,25 @@ private class DshSqliteStore(path: String, legacyProfile: DshLegacyRemoteProfile
         listOf(profile.profileId, "SSH", "SSH_TUNNEL", profile.host, profile.sshPort.toString(), profile.username, profile.remoteDshPort.toString(), profile.keyId, profile.hostFingerprint, System.currentTimeMillis().toString()),
     )
 
-    override fun loadRelayProfile(): DshRelayProfile? = queryOne(
-        "SELECT host_id, host_name, relay_origin, paired_at FROM dsh_relay_profiles LIMIT 1",
+    override fun loadRelayProfile(): DshRelayProfile? = loadRelayProfiles().firstOrNull()
+
+    override fun loadRelayProfiles(): List<DshRelayProfile> = query(
+        "SELECT host_id, host_name, relay_origin, paired_at FROM dsh_relay_profiles ORDER BY paired_at DESC",
         emptyList(),
     ) { s ->
         DshRelayProfile(s.getColumnString(0), s.getColumnString(1), s.getColumnString(2), s.getColumnLong(3))
     }
 
-    override fun saveRelayProfile(profile: DshRelayProfile) {
-        driver.transaction {
-            execute("DELETE FROM dsh_relay_profiles", emptyList())
-            execute(
-                "INSERT INTO dsh_relay_profiles (host_id, host_name, relay_origin, paired_at) VALUES (?, ?, ?, ?)",
-                listOf(profile.hostId, profile.hostName, profile.relayOrigin, profile.pairedAt.toString()),
-            )
-        }
-    }
+    override fun saveRelayProfile(profile: DshRelayProfile) = execute(
+        "INSERT OR REPLACE INTO dsh_relay_profiles (host_id, host_name, relay_origin, paired_at) VALUES (?, ?, ?, ?)",
+        listOf(profile.hostId, profile.hostName, profile.relayOrigin, profile.pairedAt.toString()),
+    )
 
     override fun clearRelayProfile() = execute("DELETE FROM dsh_relay_profiles", emptyList())
+
+    override fun clearRelayProfile(hostId: String) = execute(
+        "DELETE FROM dsh_relay_profiles WHERE host_id = ?", listOf(hostId),
+    )
 
     override fun loadBusCache(scopeId: String): String? = queryOne(
         "SELECT value FROM dsh_bus_cache WHERE scope_id = ?", listOf(scopeId),
