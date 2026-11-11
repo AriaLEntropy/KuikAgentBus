@@ -20,6 +20,7 @@ import com.kuikagentbus.protocol.busConnectorTarget
 import com.kuikagentbus.protocol.busCanRestartConnector
 import com.kuikagentbus.protocol.busParse
 import com.kuikagentbus.data.connection.DshRelayModule
+import com.kuikagentbus.data.connection.DshRelayPhase
 import com.kuikagentbus.data.connection.supportsRelayBridge
 import com.kuikagentbus.data.host.DshConnectionMode
 import com.kuikagentbus.data.models.DshSettingsChoice
@@ -50,6 +51,12 @@ import com.tencent.kuikly.core.layout.FlexPositionType
 import com.tencent.kuikly.core.reactive.handler.observable
 import com.tencent.kuikly.core.reactive.handler.observableList
 import com.tencent.kuikly.core.timer.setTimeout
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
 import com.tencent.kuikly.core.views.Image
 import com.tencent.kuikly.core.views.Text
 import com.tencent.kuikly.core.views.View
@@ -108,6 +115,17 @@ internal class DshBusHomePage : BasePager() {
     private var renameError by observable("")
     private var removeBusy by observable(false)
     private var removeError by observable("")
+    private val settingsPhones by observableList<BusSettingsPhone>()
+    private var settingsPhonesError by observable("")
+    private var settingsPhonesLoading by observable(false)
+    private var settingsPhonesRevision by observable(0)
+    private var showRemovePhone by observable(false)
+    private var removePhoneBusy by observable(false)
+    private var removePhoneError by observable("")
+    private var showRevokeGroup by observable(false)
+    private var revokeGroupBusy by observable(false)
+    private var revokeGroupError by observable("")
+    private var removePhoneId = ""
     private var projectMenuPath by observable("")
     private var projectMenuName by observable("")
     private var showRemoveProject by observable(false)
@@ -132,11 +150,13 @@ internal class DshBusHomePage : BasePager() {
     /** 任务列表滚出顶部后才亮起的 56 渐隐条 */
     private var listScrolled by observable(false)
 
-    private val collapsedProjects by observableList<String>()
+    private val collapsedProjects = mutableSetOf<String>()
     private val themeOptions by observableList<DshSettingsChoice>()
 
     /** 任务区当前这一屏的行；快照变化用 diffUpdate 增量替换 */
     private val taskRows by observableList<BusTaskAreaRow>()
+    /** 展开/收起会改变行结构；Kuikly List 不跟随行集合重建，需要显式换一版。 */
+    private var listRevision by observable(0)
 
     private var everLoaded by observable(false)
     private var waitingTooLong by observable(false)
@@ -258,6 +278,126 @@ internal class DshBusHomePage : BasePager() {
 
     private fun openSettings() {
         showSettings = true
+        // 预热过一次就直接用；没预热到（或上次失败）才现拉。
+        if (settingsPhones.isEmpty() && !settingsPhonesLoading) loadSettingsPhones()
+    }
+
+    /** FR-3.6：设置里的“手机”列表；数据从 Host 经隧道取 Relay 的设备列表。 */
+    private fun loadSettingsPhones() {
+        settingsPhonesLoading = true
+        settingsPhonesError = ""
+        settingsPhonesRevision++
+        runCatching {
+            acquireModule<DshRelayModule>(DshRelayModule.MODULE_NAME).busDevices { json ->
+                setTimeout(pagerId, 0) {
+                    settingsPhonesLoading = false
+                    settingsPhonesRevision++
+                    if (!alive) return@setTimeout
+                    if (json.isBlank()) {
+                        settingsPhonesError = "电脑未连接或未配对"
+                        return@setTimeout
+                    }
+                    val parsed = runCatching { parseSettingsPhones(json) }.getOrNull()
+                    if (parsed == null) {
+                        settingsPhonesError = "手机列表读取失败"
+                        return@setTimeout
+                    }
+                    settingsPhones.clear()
+                    settingsPhones.addAll(parsed)
+                    // 设置页是按快照构建的；列表加载完后重开一次，保证手机卡片拿到新数据。
+                    if (showSettings) {
+                        showSettings = false
+                        setTimeout(pagerId, 32) { if (alive) showSettings = true }
+                    }
+                }
+            }
+        }.onFailure {
+            settingsPhonesLoading = false
+            settingsPhonesError = it.message ?: "手机列表读取失败"
+            settingsPhonesRevision++
+        }
+    }
+
+    private fun askRevokeGroup() {
+        revokeGroupError = ""
+        showRevokeGroup = true
+    }
+
+    private fun revokeGroup() {
+        if (revokeGroupBusy) return
+        revokeGroupBusy = true
+        revokeGroupError = ""
+        runCatching {
+            acquireModule<DshRelayModule>(DshRelayModule.MODULE_NAME).busRevokeGroup { status ->
+                setTimeout(pagerId, 0) {
+                    revokeGroupBusy = false
+                    when (status) {
+                        200 -> showRevokeGroup = false
+                        409 -> revokeGroupError = "这台电脑还没有配对"
+                        0 -> revokeGroupError = "电脑已断开，正在回到扫码页"
+                        else -> revokeGroupError = "解散失败（$status）"
+                    }
+                }
+            }
+        }.onFailure {
+            revokeGroupBusy = false
+            revokeGroupError = it.message ?: "解散失败"
+        }
+    }
+
+    private fun parseSettingsPhones(json: String): List<BusSettingsPhone> {
+        val root = busParse(json).jsonObject
+        val list = root["devices"] as? JsonArray ?: return emptyList()
+        val mine = runCatching {
+            acquireModule<DshRelayModule>(DshRelayModule.MODULE_NAME).status().clientId
+        }.getOrDefault("")
+        return list.mapNotNull { item ->
+            val phone = item as? JsonObject ?: return@mapNotNull null
+            val id = (phone["id"] as? JsonPrimitive)?.contentOrNull ?: return@mapNotNull null
+            BusSettingsPhone(
+                id = id,
+                name = (phone["deviceLabel"] as? JsonPrimitive)?.contentOrNull
+                    .orEmpty()
+                    .ifBlank { "手机" },
+                platform = (phone["platform"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
+                online = (phone["online"] as? JsonPrimitive)?.booleanOrNull == true,
+                mine = mine.isNotBlank() && id == mine,
+            )
+        }
+    }
+
+    private fun askRemovePhone(phone: BusSettingsPhone) {
+        if (phone.mine || settingsPhones.size <= 1) return
+        removePhoneId = phone.id
+        removePhoneError = ""
+        showRemovePhone = true
+    }
+
+    private fun removePhone() {
+        if (removePhoneBusy) return
+        val id = removePhoneId
+        if (id.isBlank()) return
+        removePhoneBusy = true
+        removePhoneError = ""
+        runCatching {
+            acquireModule<DshRelayModule>(DshRelayModule.MODULE_NAME).busRemoveDevice(id) { status ->
+                setTimeout(pagerId, 0) {
+                    removePhoneBusy = false
+                    when (status) {
+                        200 -> {
+                            showRemovePhone = false
+                            loadSettingsPhones()
+                        }
+                        409 -> removePhoneError = "至少保留一台手机；要全部断开请用“解除全部配对”"
+                        0 -> removePhoneError = "电脑未连接，暂时不能移除"
+                        else -> removePhoneError = "移除失败（$status）"
+                    }
+                }
+            }
+        }.onFailure {
+            removePhoneBusy = false
+            removePhoneError = it.message ?: "移除失败"
+        }
     }
 
     /** 切列表视图（最近 / 按项目）；同时记住它是「下一次点列表分段要回到的那个视图」 */
@@ -295,14 +435,21 @@ internal class DshBusHomePage : BasePager() {
         val groups = homeView.projectGroups(selectedAgentKeys)
         if (groups.isEmpty()) return
         groups.drop(1).forEach { group ->
-            if (!collapsedProjects.contains(group.key)) collapsedProjects.add(group.key)
+            if (!collapsedProjects.contains(group.collapseKey())) collapsedProjects.add(group.collapseKey())
         }
         projectsInitialized = true
     }
 
-    private fun toggleProject(key: String) {
-        if (collapsedProjects.contains(key)) collapsedProjects.remove(key) else collapsedProjects.add(key)
-        syncTaskRows()
+    private fun setProjectExpanded(key: String, expanded: Boolean) {
+        // 用户已经手动动过分组，后续刷新不能再按“首次进入”的默认折叠规则补回去。
+        projectsInitialized = true
+        if (expanded) {
+            if (collapsedProjects.contains(key)) collapsedProjects.remove(key)
+        } else {
+            if (!collapsedProjects.contains(key)) collapsedProjects.add(key)
+        }
+        syncTaskRows(force = true)
+        listRevision++
     }
 
     /**
@@ -311,13 +458,20 @@ internal class DshBusHomePage : BasePager() {
      * 默认用 data class 的 `==` 比较：内容没变的行保持原节点，
      * 标题 / 时间 / 摘要变了的行才重建，滚动位置不动
      */
-    private fun syncTaskRows() {
+    private fun syncTaskRows(force: Boolean = false) {
         val nextRows = if (listViewMode == BUS_VIEW_PROJECTS) {
             busTaskAreaProjectRows(homeView.projectGroups(selectedAgentKeys), collapsedProjects.toSet())
         } else {
             busTaskAreaRecentRows(visibleTasks())
         }
-        taskRows.diffUpdate(nextRows)
+        if (force) {
+            // 展开/收起改变的是同一组里“有没有任务行”，diffUpdate 只按行身份复用，
+            // 会把折叠/展开的变化吞掉；这里直接重建，保证分组头和任务一起换。
+            taskRows.clear()
+            taskRows.addAll(nextRows)
+        } else {
+            taskRows.diffUpdate(nextRows)
+        }
         applyBodyState()
     }
 
@@ -1049,6 +1203,10 @@ internal class DshBusHomePage : BasePager() {
         pollBusHome()
         pollBusNotify()
         connectIfNeeded()
+        watchRelayRemoval()
+        setTimeout(pagerId, 2_000) {
+            if (alive && settingsPhones.isEmpty()) loadSettingsPhones()
+        }
         if (hasConnection) {
             setTimeout(pagerId, 8_000) {
                 if (alive && homeView.device == null) {
@@ -1070,6 +1228,40 @@ internal class DshBusHomePage : BasePager() {
         if (connectionMode != "relay") return
         runCatching {
             acquireModule<DshRelayModule>(DshRelayModule.MODULE_NAME).connect { refreshBusHome() }
+        }
+    }
+
+    /**
+     * 电脑端移除这台手机后，不留在旧快照上反复重连；清掉这台电脑的本机档案，
+     * 直接打开扫码入口（FR-3.6 验收）。
+     */
+    private fun watchRelayRemoval() {
+        runCatching {
+            acquireModule<DshRelayModule>(DshRelayModule.MODULE_NAME).subscribe { state ->
+                if (!alive || state.phase != DshRelayPhase.REMOVED) return@subscribe
+                setTimeout(pagerId, 0) {
+                    if (!alive) return@setTimeout
+                    val removedHost = state.hostId
+                    connectionMode = ""
+                    hasConnection = false
+                    homeView = BusHomeView(device = null, agents = emptyList(), tasks = emptyList())
+                    syncTaskRows(force = true)
+                    applyBodyState()
+                    everLoaded = false
+                    waitingTooLong = false
+                    approvalLoading = false
+                    showSettings = false
+                    showDeviceSheet = false
+                    showAddComputer = true
+                    showRemovePhone = false
+                    showRevokeGroup = false
+                    addComputerError = state.message.ifBlank { "这台电脑已移除本机，请重新扫码" }
+                    localHostName = ""
+                    if (removedHost.isNotBlank()) {
+                        runCatching { store?.clearRelayProfile(removedHost) }
+                    }
+                }
+            }
         }
     }
 
@@ -1149,7 +1341,7 @@ internal class DshBusHomePage : BasePager() {
     }
 
     private fun pollBusHome() {
-        setTimeout(pagerId, 2_000) {
+        setTimeout(pagerId, 500) {
             if (!alive) return@setTimeout
             refreshBusHome()
             pollBusHome()
@@ -1291,22 +1483,26 @@ internal class DshBusHomePage : BasePager() {
                         this@DshBusHomePage.viewMode != BUS_VIEW_APPROVAL &&
                             this@DshBusHomePage.bodyState == BusHomeBodyState.Content
                     }) {
-                        BusHomeTaskList(
-                            rows = this@DshBusHomePage.taskRows,
-                            cardWidth = busHomeCardWidth(pageWidth),
-                            rowWidth = busHomeRowWidth(pageWidth),
-                            palette = p,
-                            topFadeVisible = { this@DshBusHomePage.listScrolled },
-                            initialRenderRows = BUS_HOME_INITIAL_RENDER_ROWS,
-                            maxRenderedRows = BUS_HOME_MAX_RENDERED_ROWS,
-                            preloadHeight = pageHeight,
-                            onScrollY = {
-                                this@DshBusHomePage.listScrolled = it > 1f
-                            },
-                            onOpenTask = { this@DshBusHomePage.openBusChat(it) },
-                            onToggleGroup = { this@DshBusHomePage.toggleProject(it) },
-                            onGroupMenu = { this@DshBusHomePage.openProjectMenu(it.name, it.path) },
-                        )
+                        vbind({ this@DshBusHomePage.listRevision }) {
+                            BusHomeTaskList(
+                                rows = this@DshBusHomePage.taskRows,
+                                cardWidth = busHomeCardWidth(pageWidth),
+                                rowWidth = busHomeRowWidth(pageWidth),
+                                palette = p,
+                                topFadeVisible = { this@DshBusHomePage.listScrolled },
+                                initialRenderRows = BUS_HOME_INITIAL_RENDER_ROWS,
+                                maxRenderedRows = BUS_HOME_MAX_RENDERED_ROWS,
+                                preloadHeight = pageHeight,
+                                onScrollY = {
+                                    this@DshBusHomePage.listScrolled = it > 1f
+                                },
+                                onOpenTask = { this@DshBusHomePage.openBusChat(it) },
+                                onToggleGroup = { key, expanded ->
+                                    this@DshBusHomePage.setProjectExpanded(key, expanded)
+                                },
+                                onGroupMenu = { this@DshBusHomePage.openProjectMenu(it.name, it.path) },
+                            )
+                        }
                     }
                     vif({
                         this@DshBusHomePage.viewMode != BUS_VIEW_APPROVAL &&
@@ -1471,9 +1667,12 @@ internal class DshBusHomePage : BasePager() {
             }
 
             vif({ this@DshBusHomePage.showSettings }) {
-                vbind({ this@DshBusHomePage.localHostName }) {
+                vbind({ this@DshBusHomePage.settingsPhonesRevision }) {
                 this.BusSettingsOverlay(
                     computers = this@DshBusHomePage.settingsComputers(),
+                    phones = this@DshBusHomePage.settingsPhones,
+                    phonesError = this@DshBusHomePage.settingsPhonesError,
+                    phonesLoading = this@DshBusHomePage.settingsPhonesLoading,
                     agents = this@DshBusHomePage.homeView.agents,
                     themeModeLabel = { dshThemeModeLabel(this@DshBusHomePage.themeMode) },
                     statusBarHeight = dshTopInset(
@@ -1490,6 +1689,8 @@ internal class DshBusHomePage : BasePager() {
                         this@DshBusHomePage.removeError = ""
                         this@DshBusHomePage.showRemoveComputer = true
                     },
+                    onRemovePhone = { this@DshBusHomePage.askRemovePhone(it) },
+                    onRevokeGroup = { this@DshBusHomePage.askRevokeGroup() },
                     onPickTheme = { this@DshBusHomePage.showThemePicker = true },
                 )
                 }
@@ -1619,6 +1820,40 @@ internal class DshBusHomePage : BasePager() {
                     this@DshBusHomePage.removeError = ""
                 },
                 onConfirm = { this@DshBusHomePage.removeCurrentComputer() },
+                pageViewWidth = this@DshBusHomePage.pagerData.pageViewWidth,
+                colors = { this@DshBusHomePage.themeColors },
+            )
+            DshSessionConfirmDialog(
+                visible = { this@DshBusHomePage.showRemovePhone },
+                title = "移除这台手机?",
+                message = "移除后，这台手机需要重新扫码才能连上；其他手机不受影响。",
+                busyLabel = "移除中...",
+                confirmLabel = "移除手机",
+                confirmColor = { this@DshBusHomePage.themeColors.stateErrorPrimary },
+                busy = { this@DshBusHomePage.removePhoneBusy },
+                error = { this@DshBusHomePage.removePhoneError },
+                onCancel = {
+                    this@DshBusHomePage.showRemovePhone = false
+                    this@DshBusHomePage.removePhoneError = ""
+                },
+                onConfirm = { this@DshBusHomePage.removePhone() },
+                pageViewWidth = this@DshBusHomePage.pagerData.pageViewWidth,
+                colors = { this@DshBusHomePage.themeColors },
+            )
+            DshSessionConfirmDialog(
+                visible = { this@DshBusHomePage.showRevokeGroup },
+                title = "解散整组?",
+                message = "所有手机和这台电脑都会回到未配对状态，需要重新扫码。",
+                busyLabel = "解散中...",
+                confirmLabel = "解散整组",
+                confirmColor = { this@DshBusHomePage.themeColors.stateErrorPrimary },
+                busy = { this@DshBusHomePage.revokeGroupBusy },
+                error = { this@DshBusHomePage.revokeGroupError },
+                onCancel = {
+                    this@DshBusHomePage.showRevokeGroup = false
+                    this@DshBusHomePage.revokeGroupError = ""
+                },
+                onConfirm = { this@DshBusHomePage.revokeGroup() },
                 pageViewWidth = this@DshBusHomePage.pagerData.pageViewWidth,
                 colors = { this@DshBusHomePage.themeColors },
             )

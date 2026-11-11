@@ -432,6 +432,13 @@ internal class BusChatPage : BasePager() {
                 lastMessage = info.lastMessage
                 status = info.status
                 statusLabel = info.statusLabel.ifBlank { taskStatusLabel(info.status) }
+                // 失败原因由电脑端写进 lastMessage；直接顶到输入条上方的错误行，
+                // 避免聊天区只有用户消息、看起来像“没有任何返回”。
+                if (info.status == "failed" && info.lastMessage.isNotBlank()) {
+                    error = info.lastMessage
+                } else if (lastStatus == "failed" && info.status != "failed" && error.isNotBlank()) {
+                    error = ""
+                }
                 val nextRequest = info.request
                 if (nextRequest?.requestId != pendingRequest?.requestId) {
                     pendingRequest = nextRequest

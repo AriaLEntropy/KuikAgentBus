@@ -29,12 +29,24 @@ internal data class BusSettingsComputer(
     val active: Boolean = false,
 )
 
+/** 设置页里的手机项（FR-3.6）；`mine` 表示当前这部手机自己。 */
+internal data class BusSettingsPhone(
+    val id: String,
+    val name: String,
+    val platform: String,
+    val online: Boolean,
+    val mine: Boolean,
+)
+
 /**
  * Bus 版设置页：沿用旧设置页的顶栏与卡片规范，
  * 但只依赖 Bus 快照，不再接 DSH Host 的 settings/models/plugins 接口
  */
 internal fun ViewContainer<*, *>.BusSettingsOverlay(
     computers: List<BusSettingsComputer>,
+    phones: List<BusSettingsPhone>,
+    phonesError: String,
+    phonesLoading: Boolean,
     agents: List<BusHomeAgent>,
     themeModeLabel: () -> String,
     statusBarHeight: Float,
@@ -45,6 +57,8 @@ internal fun ViewContainer<*, *>.BusSettingsOverlay(
     onSwitchComputer: (BusSettingsComputer) -> Unit,
     onRenameComputer: (BusSettingsComputer) -> Unit,
     onRemoveComputer: (BusSettingsComputer) -> Unit,
+    onRemovePhone: (BusSettingsPhone) -> Unit,
+    onRevokeGroup: () -> Unit,
     onPickTheme: () -> Unit,
 ) {
     // 不要用 Modal(inWindow=true)：主题选择器本身是 in-window Modal，
@@ -140,6 +154,71 @@ internal fun ViewContainer<*, *>.BusSettingsOverlay(
                 )
             }
 
+            DshSettingsCardGroupTitle("手机", colors = colors)
+            DshSettingsCard(colors = colors) {
+                when {
+                    phonesLoading -> DshSettingsRow(
+                        icon = "computer.svg",
+                        title = "正在读取手机列表…",
+                        value = { "" },
+                        onClick = {},
+                        colors = colors,
+                        showChevron = false,
+                        showDivider = false,
+                    )
+                    phonesError.isNotBlank() -> DshSettingsRow(
+                        icon = "computer.svg",
+                        title = "手机列表不可用",
+                        value = { phonesError },
+                        onClick = {},
+                        colors = colors,
+                        showChevron = false,
+                        showDivider = false,
+                    )
+                    phones.isEmpty() -> DshSettingsRow(
+                        icon = "computer.svg",
+                        title = "还没有手机",
+                        value = { "扫码添加" },
+                        onClick = {},
+                        colors = colors,
+                        showChevron = false,
+                        showDivider = false,
+                    )
+                    else -> phones.forEachIndexed { index, phone ->
+                        BusPhoneItem(
+                            phone = phone,
+                            canRemove = !phone.mine && phones.size > 1,
+                            colors = colors,
+                            onRemove = { onRemovePhone(phone) },
+                        )
+                        if (index < phones.lastIndex) {
+                            View {
+                                attr {
+                                    height(1f)
+                                    marginLeft(busHomePx(16f))
+                                    marginRight(busHomePx(16f))
+                                    backgroundColor(colors().borderL2)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            DshSettingsCardGroupTitle("危险操作", colors = colors)
+            DshSettingsCard(colors = colors) {
+                DshSettingsRow(
+                    icon = "log.svg",
+                    title = "解散整组",
+                    value = { "所有手机和电脑重新配对" },
+                    onClick = onRevokeGroup,
+                    colors = colors,
+                    danger = true,
+                    showChevron = false,
+                    showDivider = false,
+                )
+            }
+
             DshSettingsCardGroupTitle("应用", colors = colors)
             DshSettingsCard(colors = colors) {
                 DshSettingsRow(
@@ -200,6 +279,104 @@ internal fun ViewContainer<*, *>.BusSettingsOverlay(
                 )
             }
             View { attr { height(maxOf(24f, pagerData.safeAreaInsets.bottom)) } }
+        }
+    }
+}
+
+private fun ViewContainer<*, *>.BusPhoneItem(
+    phone: BusSettingsPhone,
+    canRemove: Boolean,
+    colors: () -> DshColorTokens,
+    onRemove: () -> Unit,
+) {
+    View {
+        attr {
+            flexDirectionRow()
+            alignItemsCenter()
+            paddingLeft(busHomePx(16f))
+            paddingRight(busHomePx(16f))
+            paddingTop(busHomePx(13f))
+            paddingBottom(busHomePx(12f))
+        }
+        View {
+            attr {
+                size(busHomePx(34f), busHomePx(34f))
+                borderRadius(busHomePx(17f))
+                backgroundColor(if (colors().isDark) Color(0xFF2A2A31) else Color(0xFFF5F5F5))
+                alignItemsCenter()
+                justifyContentCenter()
+            }
+            Image {
+                attr {
+                    src(ImageUri.commonAssets("computer.svg"))
+                    size(busHomePx(19f), busHomePx(19f))
+                    tintColor(colors().labelSecondary)
+                }
+            }
+        }
+        View {
+            attr { flex(1f); flexDirectionColumn(); marginLeft(busHomePx(12f)) }
+            View {
+                attr { flexDirectionRow(); alignItemsCenter() }
+                View {
+                    attr {
+                        size(busHomePx(6f), busHomePx(6f))
+                        borderRadius(busHomePx(3f))
+                        backgroundColor(
+                            if (phone.online) colors().stateSuccessPrimary else colors().labelTertiary,
+                        )
+                    }
+                }
+                Text {
+                    attr {
+                        text(phone.name)
+                        fontSize(busHomePx(14f))
+                        fontWeightBold()
+                        color(colors().labelPrimary)
+                        marginLeft(busHomePx(6f))
+                    }
+                }
+                if (phone.mine) {
+                    View {
+                        attr {
+                            marginLeft(busHomePx(6f))
+                            paddingLeft(busHomePx(5f))
+                            paddingRight(busHomePx(5f))
+                            paddingTop(busHomePx(1f))
+                            paddingBottom(busHomePx(1f))
+                            borderRadius(busHomePx(4f))
+                            backgroundColor(colors().bgModulePlatform)
+                        }
+                        Text {
+                            attr {
+                                text("本机")
+                                fontSize(busHomePx(10f))
+                                color(colors().labelSecondary)
+                            }
+                        }
+                    }
+                }
+            }
+            Text {
+                attr {
+                    text(platformLabel(phone.platform) + " · " + if (phone.online) "在线" else "离线")
+                    fontSize(busHomePx(11f))
+                    color(colors().labelTertiary)
+                    marginTop(busHomePx(3f))
+                }
+            }
+        }
+        if (canRemove) {
+            Text {
+                attr {
+                    text("移除")
+                    fontSize(busHomePx(13f))
+                    fontWeightMedium()
+                    color(colors().stateErrorPrimary)
+                    marginLeft(busHomePx(12f))
+                }
+                event { click { onRemove() } }
+            }
         }
     }
 }
@@ -342,6 +519,8 @@ private fun platformLabel(platform: String): String = when (platform.lowercase()
     "windows", "win32" -> "Windows"
     "linux" -> "Linux"
     "harmonyos", "ohos" -> "HarmonyOS"
+    "android" -> "Android"
+    "ios" -> "iOS"
     else -> "未知"
 }
 

@@ -55,6 +55,32 @@ internal class KRDshRelayModule : KuiklyRenderBaseModule() {
         }
         "busTakeNotify" -> mapOf("json" to (AgentHostBus.takeBusNotify() ?: ""))
         "busHostKind" -> mapOf("kind" to AgentHostBus.busHostKind())
+        "busDevices" -> {
+            thread(name = "agent-host-devices") {
+                val json = AgentHostBus.devicesJson().orEmpty()
+                activity?.runOnUiThread { callback?.invoke(mapOf("json" to json)) }
+            }
+            null
+        }
+        "busRemoveDevice" -> {
+            val clientId = runCatching { JSONObject(params ?: "{}").optString("clientId") }.getOrDefault("")
+            if (clientId.isBlank()) {
+                callback?.invoke(mapOf("status" to 0))
+            } else {
+                thread(name = "agent-host-device") {
+                    val status = AgentHostBus.removeDevice(clientId)
+                    activity?.runOnUiThread { callback?.invoke(mapOf("status" to status)) }
+                }
+            }
+            null
+        }
+        "busRevokeGroup" -> {
+            thread(name = "agent-host-revoke-group") {
+                val status = AgentHostBus.revokeGroup()
+                activity?.runOnUiThread { callback?.invoke(mapOf("status" to status)) }
+            }
+            null
+        }
         "busTaskMessages" -> {
             val taskId = runCatching { JSONObject(params ?: "{}").optString("taskId") }.getOrDefault("")
             mapOf("json" to (AgentHostBus.taskMessagesJson(taskId) ?: ""))
@@ -191,6 +217,7 @@ internal class KRDshRelayModule : KuiklyRenderBaseModule() {
         "hostId" to hostId,
         "hostName" to hostName,
         "relayOrigin" to relayOrigin,
+        "clientId" to clientId,
         "paired" to paired,
         "generation" to generation,
     )

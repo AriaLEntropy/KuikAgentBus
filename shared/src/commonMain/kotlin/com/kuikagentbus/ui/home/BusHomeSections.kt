@@ -266,7 +266,8 @@ internal sealed class BusTaskAreaRow {
         override val listLast: Boolean = false,
         val dense: Boolean = false,
     ) : BusTaskAreaRow() {
-        override val key: String = "task-${task.id}"
+        override val key: String =
+            "task-${task.id}-${task.updatedAt}-${task.status}-${task.pending}"
     }
 
     /** 按项目视图的分组头，组间发丝线长在它自己上边 */
@@ -280,7 +281,7 @@ internal sealed class BusTaskAreaRow {
         override val listFirst: Boolean = false,
         override val listLast: Boolean = false,
     ) : BusTaskAreaRow() {
-        override val key: String = "project-${group.key}"
+        override val key: String = "project-${group.key}-$expanded"
     }
 }
 
@@ -333,6 +334,9 @@ internal fun busTaskAreaRecentRows(tasks: List<BusHomeTask>): List<BusTaskAreaRo
     }
 }
 
+/** 折叠状态的统一标识：真实项目用路径，占位分组退回 key。 */
+internal fun BusHomeProjectGroup.collapseKey(): String = path.ifBlank { key }
+
 /** 按项目视图的行：所有分组共用一张分组卡，组与组之间一条发丝线 */
 internal fun busTaskAreaProjectRows(
     groups: List<BusHomeProjectGroup>,
@@ -340,7 +344,7 @@ internal fun busTaskAreaProjectRows(
 ): List<BusTaskAreaRow> {
     val rows = ArrayList<BusTaskAreaRow>(groups.size * 2)
     groups.forEach { group ->
-        val expanded = group.key !in collapsed
+        val expanded = group.collapseKey() !in collapsed
         rows += BusTaskAreaRow.GroupHeader(
             group = group,
             expanded = expanded,
@@ -882,7 +886,7 @@ internal fun ViewContainer<*, *>.BusHomeTaskList(
     preloadHeight: Float,
     onScrollY: (Float) -> Unit,
     onOpenTask: (BusHomeTask) -> Unit,
-    onToggleGroup: (String) -> Unit,
+    onToggleGroup: (String, Boolean) -> Unit,
     onGroupMenu: (BusHomeProjectGroup) -> Unit,
 ) {
     View {
@@ -952,7 +956,7 @@ private fun ViewContainer<*, *>.BusTaskAreaRowView(
     rowWidth: Float,
     palette: BusHomePalette,
     onOpenTask: (BusHomeTask) -> Unit,
-    onToggleGroup: (String) -> Unit,
+    onToggleGroup: (String, Boolean) -> Unit,
     onGroupMenu: (BusHomeProjectGroup) -> Unit,
 ) {
     View {
@@ -981,6 +985,15 @@ private fun ViewContainer<*, *>.BusTaskAreaRowView(
                 )
             }
         }
+        if (row is BusTaskAreaRow.GroupHeader) {
+            // 整张分组卡都可点；传目标状态而不是取反，重复触发也不会互相抵消
+            event {
+                click { onToggleGroup(row.group.collapseKey(), !row.expanded) }
+                longPress { params ->
+                    if (params.isStart && row.showMenu) onGroupMenu(row.group)
+                }
+            }
+        }
         when (row) {
             is BusTaskAreaRow.Task -> BusTaskRowContent(
                 task = row.task,
@@ -994,8 +1007,7 @@ private fun ViewContainer<*, *>.BusTaskAreaRowView(
                 row = row,
                 rowWidth = rowWidth,
                 palette = palette,
-                onToggle = { onToggleGroup(row.group.key) },
-                onMenu = { onGroupMenu(row.group) },
+                onToggle = { onToggleGroup(row.group.collapseKey(), !row.expanded) },
             )
         }
     }
@@ -1175,7 +1187,6 @@ private fun ViewContainer<*, *>.BusProjectHeaderContent(
     rowWidth: Float,
     palette: BusHomePalette,
     onToggle: () -> Unit,
-    onMenu: () -> Unit,
 ) {
     // 发丝线要贴到卡片内边缘，所以这一行不带左右内缩，由内部元素自己收
     View {
@@ -1195,17 +1206,13 @@ private fun ViewContainer<*, *>.BusProjectHeaderContent(
         }
         View {
             attr {
+                width(rowWidth)
                 height(BusHomeSectionTokens.groupHeadHeight)
                 flexDirectionRow()
                 alignItemsCenter()
                 // 卡片本身已有 16 内边距，箭头贴到内容右缘即与标题左缘对称
             }
-            event {
-                click { onToggle() }
-                longPress { params ->
-                    if (params.isStart && row.showMenu) onMenu()
-                }
-            }
+            event { click { onToggle() } }
             Text {
                 attr {
                     text(row.group.name)
@@ -1216,6 +1223,7 @@ private fun ViewContainer<*, *>.BusProjectHeaderContent(
                     lines(1)
                     textOverFlowTail()
                 }
+                event { click { onToggle() } }
             }
             Image {
                 attr {
@@ -1224,6 +1232,7 @@ private fun ViewContainer<*, *>.BusProjectHeaderContent(
                     tintColor(BusHomeTokens.textTertiary)
                     transform(Rotate(if (row.expanded) 0f else 270f))
                 }
+                event { click { onToggle() } }
             }
         }
     }

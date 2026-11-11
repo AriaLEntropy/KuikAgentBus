@@ -1,0 +1,105 @@
+name: e2e-emulator
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 18 * * *"
+
+jobs:
+  emulator-e2e:
+    name: android emulator protocol e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+    steps:
+      - name: Checkout mobile
+        uses: actions/checkout@v4
+
+      - name: Checkout host
+        uses: actions/checkout@v4
+        with:
+          repository: AriaLEntropy/Agent-host
+          path: host
+
+      - name: Checkout relay
+        uses: actions/checkout@v4
+        with:
+          repository: AriaLEntropy/dsh-scan-remote
+          path: relay-repo
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: |
+            platforms;android-34
+            build-tools;34.0.0
+            platform-tools
+
+      - name: Install and build host
+        working-directory: host
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install and build relay
+        working-directory: relay-repo/relay
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build debug APK
+        run: bash ./gradlew :androidApp:assembleDebug --no-daemon --console=plain
+
+      - name: Run emulator e2e
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          AGENT_HOST_RELAY_DIR: ${{ github.workspace }}/relay-repo/relay
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_5
+          disable-animations: true
+          emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect
+          script: |
+            set -euo pipefail
+            cd "$GITHUB_WORKSPACE/host"
+            ./node_modules/.bin/tsx scripts/e2e-host.ts > e2e-host.log 2>&1 &
+            HOST_PID=$!
+            trap 'kill $HOST_PID 2>/dev/null || true' EXIT
+
+            for i in $(seq 1 60); do
+              grep -q 'PAIR_LINK=' e2e-host.log && break
+              sleep 1
+            done
+            LINK=$(grep -o 'PAIR_LINK=.*' e2e-host.log | head -1 | cut -d= -f2-)
+            test -n "$LINK"
+            LINK_B64=$(printf %s "$LINK" | base64 -w0)
+
+            adb install -r "$GITHUB_WORKSPACE/androidApp/build/outputs/apk/debug/androidApp-debug.apk"
+            adb shell pm clear com.kuikagentbus
+            adb shell pm grant com.kuikagentbus android.permission.POST_NOTIFICATIONS || true
+            adb logcat -c
+            adb shell am start -n com.kuikagentbus/.e2e.E2eActivity --es e2e_pair_b64 "$LINK_B64"
+
+            for i in $(seq 1 120); do
+              LINE=$(adb logcat -d -s E2eDriver:I | grep 'E2E_RESULT' | tail -1 || true)
+              test -n "$LINE" && break
+              sleep 1
+            done
+            adb logcat -d -s E2eDriver:I
+            echo "--- host log ---"
+            tail -80 e2e-host.log
+            adb logcat -d -s E2eDriver:I | grep -q 'E2E_RESULT PASS'

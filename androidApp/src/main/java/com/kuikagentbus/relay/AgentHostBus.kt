@@ -96,6 +96,71 @@ internal object AgentHostBus {
     /** 前台横幅读取最近一条 notify；读完即清。 */
     fun takeBusNotify(): String? = BusNotifyCenter.take()
 
+    /** 当前 Host 绑定的手机列表（FR-3.6）；未连接或 Host 未配对时返回 null。 */
+    fun devicesJson(): String? {
+        val port = commandPort
+        val token = commandToken
+        if (port <= 0 || token.isEmpty()) return null
+        return runCatching {
+            OkHttpClient.Builder()
+                .callTimeout(8, TimeUnit.SECONDS)
+                .build()
+                .newCall(
+                    Request.Builder()
+                        .url("http://127.0.0.1:$port/bus/devices")
+                        .header("Authorization", "Bearer $token")
+                        .get()
+                        .build(),
+                )
+                .execute()
+                .use { response ->
+                    if (!response.isSuccessful) null else response.body?.string()
+                }
+        }.getOrNull()
+    }
+
+    /** 解散整组：Relay 吊销全部手机和电脑凭据；返回 HTTP 状态码。 */
+    fun revokeGroup(): Int {
+        val port = commandPort
+        val token = commandToken
+        if (port <= 0 || token.isEmpty()) return 0
+        return runCatching {
+            OkHttpClient.Builder()
+                .callTimeout(8, TimeUnit.SECONDS)
+                .build()
+                .newCall(
+                    Request.Builder()
+                        .url("http://127.0.0.1:$port/bus/group/revoke")
+                        .header("Authorization", "Bearer $token")
+                        .post("{}".toRequestBody("application/json; charset=utf-8".toMediaType()))
+                        .build(),
+                )
+                .execute()
+                .use { it.code }
+        }.getOrDefault(0)
+    }
+
+    /** 移除同一台电脑上的另一台手机；返回 HTTP 状态码，0 表示隧道未就绪。 */
+    fun removeDevice(clientId: String): Int {
+        val port = commandPort
+        val token = commandToken
+        if (port <= 0 || token.isEmpty() || clientId.isBlank()) return 0
+        return runCatching {
+            OkHttpClient.Builder()
+                .callTimeout(8, TimeUnit.SECONDS)
+                .build()
+                .newCall(
+                    Request.Builder()
+                        .url("http://127.0.0.1:$port/bus/devices/${Uri.encode(clientId)}/revoke")
+                        .header("Authorization", "Bearer $token")
+                        .post("{}".toRequestBody("application/json; charset=utf-8".toMediaType()))
+                        .build(),
+                )
+                .execute()
+                .use { it.code }
+        }.getOrDefault(0)
+    }
+
     fun command(json: String): BusCommandAck? {
         val port = commandPort
         val token = commandToken

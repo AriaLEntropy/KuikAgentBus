@@ -30,6 +30,7 @@ internal data class DshRelayNativeState(
     val hostId: String = "",
     val hostName: String = "",
     val relayOrigin: String = "",
+    val clientId: String = "",
     val paired: Boolean = false,
     val generation: Long = 0,
 )
@@ -66,6 +67,7 @@ internal object DshRelayManager {
     private var relayOrigin = ""
     private var hostId = ""
     @Volatile private var stopped = true
+    @Volatile private var removed = false
     @Volatile private var droppingSocket = false
     @Volatile private var state = DshRelayNativeState("IDLE")
     @Volatile private var pairStartedAt = 0L
@@ -91,7 +93,7 @@ internal object DshRelayManager {
             hostId = stored.hostId().orEmpty()
             hostName = stored.hostName().orEmpty()
             relayOrigin = stored.relayOrigin().orEmpty()
-            publish(state.copy(paired = true, hostId = hostId, hostName = hostName, relayOrigin = relayOrigin, phase = if (state.phase == "READY") "READY" else "IDLE"))
+            publish(state.copy(paired = true, hostId = hostId, hostName = hostName, relayOrigin = relayOrigin, clientId = stored.clientId().orEmpty(), phase = if (state.phase == "READY") "READY" else "IDLE"))
         }
     }
 
@@ -107,7 +109,7 @@ internal object DshRelayManager {
             val body = JSONObject()
                 .put("pairId", link.pairId)
                 .put("claimToken", claimToken)
-                .put("deviceLabel", "Android")
+                .put("deviceLabel", Build.MODEL?.trim().takeUnless { it.isNullOrBlank() } ?: "Android")
                 .put("platform", "android")
             val response = http.newCall(
                 Request.Builder()
@@ -118,19 +120,29 @@ internal object DshRelayManager {
             ).execute()
             val json = JSONObject(response.body?.string().orEmpty().ifBlank { "{}" })
             if (!response.isSuccessful) {
-                val reason = json.optString("error").ifBlank { "claim failed (${response.code})" }
+                val code = json.optString("error")
+                val reason = when (code) {
+                    "expired" -> "二维码已过期，请让电脑重新生成"
+                    "already_claimed" -> "二维码已被其他手机认领"
+                    "device_limit" -> "这台电脑已达 10 台手机上限，请先在电脑上移除一台"
+                    "invalid_claim" -> "配对参数不匹配，请重新扫码"
+                    "not_found" -> "配对会话不存在，请重新扫码"
+                    else -> code.ifBlank { "claim failed (${response.code})" }
+                }
                 publish(DshRelayNativeState("ERROR", reason, paired = secrets?.hasPairing() == true))
                 return mapOf("ok" to false, "message" to reason)
             }
             val newHostId = json.optString("hostId")
             val token = json.optString("clientToken")
+            val newClientId = json.optString("clientId")
             val name = json.optString("hostName").ifBlank { "电脑" }
             require(newHostId.isNotBlank() && token.isNotBlank()) { "pairing response missing credentials" }
-            secrets?.save(link.masterKey, token, newHostId, name, link.origin)
+            removed = false
+            secrets?.save(link.masterKey, token, newHostId, name, link.origin, newClientId)
             hostId = newHostId
             hostName = name
             relayOrigin = link.origin
-            publish(DshRelayNativeState("IDLE", "已配对", hostId = newHostId, hostName = name, relayOrigin = link.origin, paired = true))
+            publish(DshRelayNativeState("IDLE", "已配对", hostId = newHostId, hostName = name, relayOrigin = link.origin, clientId = newClientId, paired = true))
             Log.i(TAG, "PAIR_TIMING scan_to_claim_ms=${System.currentTimeMillis() - scanStartedAt}")
             mapOf("ok" to true, "hostId" to newHostId, "hostName" to name, "relayOrigin" to link.origin, "pairedAt" to System.currentTimeMillis())
         } catch (error: Exception) {
@@ -143,6 +155,10 @@ internal object DshRelayManager {
 
     fun connect(context: Context) {
         attach(context)
+        if (removed) {
+            publish(DshRelayNativeState("REMOVED", "这台电脑已移除本机，请重新扫码", paired = false))
+            return
+        }
         if (loopbackListening()) {
             stopped = false
             startForeground(context)
@@ -185,6 +201,7 @@ internal object DshRelayManager {
 
     fun forget() {
         val current = hostId
+        removed = false
         disconnect()
         // FR-9.2 验收：解除配对时清掉这台电脑的产物缓存
         appContext?.cacheDir?.let { AgentHostBus.clearArtifactCache(it) }
@@ -201,6 +218,7 @@ internal object DshRelayManager {
         val stored = secrets ?: return false
         if (targetHostId == hostId && state.phase == "READY") return true
         if (!stored.select(targetHostId)) return false
+        removed = false
         disconnect()
         hostId = stored.hostId().orEmpty()
         hostName = stored.hostName().orEmpty()
@@ -212,6 +230,7 @@ internal object DshRelayManager {
                 hostId = hostId,
                 hostName = hostName,
                 relayOrigin = relayOrigin,
+                clientId = stored.clientId().orEmpty(),
                 paired = true,
             ),
         )
@@ -235,7 +254,8 @@ internal object DshRelayManager {
             hostId = stored.hostId().orEmpty()
             hostName = stored.hostName().orEmpty().ifBlank { hostName }
             relayOrigin = origin
-            publish(DshRelayNativeState("CONNECTING", "正在申请访问票", hostId = hostId, hostName = hostName, relayOrigin = origin, paired = true, generation = myGeneration))
+            val clientId = stored.clientId().orEmpty()
+            publish(DshRelayNativeState("CONNECTING", "正在申请访问票", hostId = hostId, hostName = hostName, relayOrigin = origin, clientId = clientId, paired = true, generation = myGeneration))
             val ticketResponse = http.newCall(
                 Request.Builder()
                     .url("$origin/access-ticket")
@@ -245,14 +265,25 @@ internal object DshRelayManager {
                     .build(),
             ).execute()
             val ticketJson = JSONObject(ticketResponse.body?.string().orEmpty().ifBlank { "{}" })
-            if (!ticketResponse.isSuccessful) throw IllegalStateException(ticketJson.optString("error").ifBlank { "ticket failed" })
+            if (!ticketResponse.isSuccessful) {
+                if (
+                    ticketResponse.code == 401 &&
+                    ticketJson.optString("error") == "invalid_client_token"
+                ) {
+                    handleRemoved("access ticket rejected")
+                    return
+                }
+                throw IllegalStateException(ticketJson.optString("error").ifBlank { "ticket failed" })
+            }
             val sessionId = ticketJson.optString("accessSessionId")
             val ticket = ticketJson.optString("ticket")
             val tunnelUrl = ticketJson.optString("tunnelUrl").ifBlank { toWs(origin) + "/client-tunnel" }
             hostId = ticketJson.optString("hostId").ifBlank { hostId }
+            val ticketClientId = ticketJson.optString("clientId").ifBlank { clientId }
+            if (ticketClientId.isNotBlank()) stored.saveClientId(ticketClientId)
             require(ticket.isNotBlank() && sessionId.isNotBlank()) { "ticket response incomplete" }
             accessSessionId = sessionId
-            publish(state.copy(phase = "HANDSHAKING", message = "正在建立加密隧道", generation = myGeneration, hostId = hostId, hostName = hostName, relayOrigin = origin, paired = true))
+            publish(state.copy(phase = "HANDSHAKING", message = "正在建立加密隧道", generation = myGeneration, hostId = hostId, hostName = hostName, relayOrigin = origin, clientId = ticketClientId, paired = true))
             val clientRandomB64 = SealedTunnelCrypto.encodeBase64Url(SealedTunnelCrypto.randomBytes())
             val hello = envelope(
                 "client_hello",
@@ -287,6 +318,10 @@ internal object DshRelayManager {
                     }
                     override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                         if (socket === webSocket) socket = null
+                        if ((code == 4001 || code == 4003) && myGeneration == generation.get()) {
+                            handleRemoved("tunnel closed $code")
+                            return
+                        }
                         if (!stopped && myGeneration == generation.get()) {
                             connecting.set(false)
                             scheduleReconnect()
@@ -352,6 +387,10 @@ internal object DshRelayManager {
                     val reason = msg.optJSONObject("payload")?.optString("reason").orEmpty()
                     Log.w(TAG, "relay closed type=${msg.optString("type")} reason=$reason")
                     connecting.set(false)
+                    if (reason.contains("revoked") || reason.contains("unbound")) {
+                        handleRemoved(reason)
+                        return
+                    }
                     scheduleReconnect()
                 }
             }
@@ -374,7 +413,7 @@ internal object DshRelayManager {
         val port = server.start()
         loopback = server
         Log.i(TAG, "loopback listening port=$port")
-        publish(DshRelayNativeState("READY", "扫码隧道已连接", localPort = port, localToken = localToken, hostId = hostId, hostName = hostName, relayOrigin = origin, paired = true, generation = myGeneration))
+        publish(DshRelayNativeState("READY", "扫码隧道已连接", localPort = port, localToken = localToken, hostId = hostId, hostName = hostName, relayOrigin = origin, clientId = secrets?.clientId().orEmpty(), paired = true, generation = myGeneration))
         val scanStartedAt = pairStartedAt
         pairStartedAt = 0L
         if (scanStartedAt > 0) {
@@ -453,8 +492,46 @@ internal object DshRelayManager {
     private fun envelope(type: String, payload: JSONObject, channel: String? = null): JSONObject =
         JSONObject().put("v", 1).put("type", type).apply { if (channel != null) put("channel", channel) }.put("id", UUID.randomUUID().toString()).put("ts", System.currentTimeMillis()).put("payload", payload)
 
+    /**
+     * 电脑端移除了这台手机（或解散整组）。
+     *
+     * 访问票被拒、隧道以 4001/4003 关闭都走这里：停掉重连，清掉本机这台电脑的
+     * 配对凭据，回到扫码入口；不能再拿已作废的 token 反复重试。
+     */
+    @Synchronized
+    private fun handleRemoved(reason: String) {
+        if (removed) return
+        removed = true
+        stopped = true
+        generation.incrementAndGet()
+        connecting.set(false)
+        reconnectScheduled.set(false)
+        unregisterNetwork()
+        dropSocket()
+        cipher = null
+        accessSessionId = ""
+        localToken = ""
+        dropLoopback("removed")
+        AgentHostBus.clear()
+        stopForeground()
+        val current = hostId
+        Log.w(TAG, "device removed by host: $reason hostId=$current")
+        if (current.isNotBlank()) secrets?.clear(current)
+        hostId = ""
+        hostName = ""
+        relayOrigin = ""
+        publish(
+            DshRelayNativeState(
+                "REMOVED",
+                "这台电脑已移除本机，请重新扫码",
+                hostId = current,
+                paired = false,
+            ),
+        )
+    }
+
     private fun scheduleReconnect() {
-        if (stopped) return
+        if (stopped || removed) return
         if (!reconnectScheduled.compareAndSet(false, true)) return
         dropSocket()
         dropLoopback("reconnect")
@@ -469,9 +546,21 @@ internal object DshRelayManager {
         thread(name = "dsh-relay-retry") {
             try {
                 Thread.sleep(2_000)
-                if (!stopped && connecting.compareAndSet(false, true)) connectInternal()
-            } finally {
+                if (stopped) {
+                    reconnectScheduled.set(false)
+                    return@thread
+                }
+                // 先放开标志再尝试连接：这次尝试如果失败，会自己再 schedule 下一拍；
+                // 否则内层 scheduleReconnect 会被这里仍为 true 的标志吞掉，永久停住。
                 reconnectScheduled.set(false)
+                if (connecting.compareAndSet(false, true)) connectInternal()
+            } catch (error: InterruptedException) {
+                reconnectScheduled.set(false)
+                Thread.currentThread().interrupt()
+            } catch (error: Exception) {
+                reconnectScheduled.set(false)
+                Log.e(TAG, "relay retry failed", error)
+                scheduleReconnect()
             }
         }
     }

@@ -4,7 +4,7 @@ import com.tencent.kuikly.core.module.Module
 import com.tencent.kuikly.core.nvi.serialization.json.JSONObject
 
 enum class DshRelayPhase {
-    IDLE, SCANNING, PAIRING, CONNECTING, HANDSHAKING, READY, RECONNECTING, ERROR, STOPPED,
+    IDLE, SCANNING, PAIRING, CONNECTING, HANDSHAKING, READY, RECONNECTING, ERROR, STOPPED, REMOVED,
 }
 
 data class DshRelayState(
@@ -15,6 +15,7 @@ data class DshRelayState(
     val hostId: String = "",
     val hostName: String = "",
     val relayOrigin: String = "",
+    val clientId: String = "",
     val paired: Boolean = false,
     val generation: Long = 0,
 )
@@ -106,6 +107,28 @@ class DshRelayModule : Module() {
         return runCatching { JSONObject(raw).optString("json") }
             .getOrNull()
             ?.takeIf { it.isNotBlank() }
+    }
+
+    /** FR-3.6：同一台电脑上的手机列表；返回原始 JSON，页面按字段渲染。 */
+    fun busDevices(onResult: (String) -> Unit) {
+        toNative(true, "busDevices", null, { value ->
+            onResult(value?.optString("json").orEmpty())
+        }, false)
+    }
+
+    /** FR-3.6：移除另一台手机；回 HTTP 状态码，0 表示隧道未就绪。 */
+    fun busRemoveDevice(clientId: String, onResult: (Int) -> Unit) {
+        val params = JSONObject().apply { put("clientId", clientId) }
+        toNative(true, "busRemoveDevice", params.toString(), { value ->
+            onResult(value?.optInt("status") ?: 0)
+        }, false)
+    }
+
+    /** FR-3.6：解散整组；成功后所有手机和电脑都会回到未配对状态。 */
+    fun busRevokeGroup(onResult: (Int) -> Unit) {
+        toNative(true, "busRevokeGroup", null, { value ->
+            onResult(value?.optInt("status") ?: 0)
+        }, false)
     }
 
     /** FR-10.1：取最近一条 notify 的 JSON；读完即清。 */
@@ -258,6 +281,7 @@ private fun JSONObject?.toRelayState(): DshRelayState {
         hostId = value.optString("hostId"),
         hostName = value.optString("hostName"),
         relayOrigin = value.optString("relayOrigin"),
+        clientId = value.optString("clientId"),
         paired = value.optBoolean("paired"),
         generation = value.optLong("generation"),
     )

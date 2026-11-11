@@ -31,11 +31,23 @@ internal class DshRelaySecrets(context: Context) {
         hostId: String,
         hostName: String,
         relayOrigin: String,
+        clientId: String = "",
     ) {
-        writeSet(root, masterKeyB64, clientToken, hostId, hostName, relayOrigin)
+        writeSet(root, masterKeyB64, clientToken, hostId, hostName, relayOrigin, clientId)
         if (hostId.isNotBlank()) {
             val hostDir = hostDir(hostId).apply { mkdirs() }
-            writeSet(hostDir, masterKeyB64, clientToken, hostId, hostName, relayOrigin)
+            writeSet(hostDir, masterKeyB64, clientToken, hostId, hostName, relayOrigin, clientId)
+        }
+    }
+
+    /** 旧配对没有 client-id.bin；连上 Relay 后在 access-ticket 响应里补回来。 */
+    @Synchronized
+    fun saveClientId(clientId: String) {
+        if (clientId.isBlank()) return
+        write("client-id.bin", clientId.toByteArray())
+        val current = hostId().orEmpty()
+        if (current.isNotBlank()) {
+            write("client-id.bin", clientId.toByteArray(), hostDir(current))
         }
     }
 
@@ -48,13 +60,15 @@ internal class DshRelaySecrets(context: Context) {
         val host = read("host.bin", hostDir)?.toString(Charsets.UTF_8) ?: return false
         val name = read("name.bin", hostDir)?.toString(Charsets.UTF_8).orEmpty()
         val origin = read("origin.bin", hostDir)?.toString(Charsets.UTF_8).orEmpty()
-        writeSet(root, master, client, host, name, origin)
+        val clientId = read("client-id.bin", hostDir)?.toString(Charsets.UTF_8).orEmpty()
+        writeSet(root, master, client, host, name, origin, clientId)
         File(root, "bus.bin").delete()
         return true
     }
 
     fun masterKey(): String? = read("master.bin")?.toString(Charsets.UTF_8)
     fun clientToken(): String? = read("client.bin")?.toString(Charsets.UTF_8)
+    fun clientId(): String? = read("client-id.bin")?.toString(Charsets.UTF_8)
     fun hostId(): String? = read("host.bin")?.toString(Charsets.UTF_8)
     fun hostName(): String? = read("name.bin")?.toString(Charsets.UTF_8)
     fun relayOrigin(): String? = read("origin.bin")?.toString(Charsets.UTF_8)
@@ -94,7 +108,7 @@ internal class DshRelaySecrets(context: Context) {
     }
 
     fun clear() {
-        listOf("master.bin", "client.bin", "host.bin", "name.bin", "origin.bin", "bus.bin").forEach { File(root, it).delete() }
+        listOf("master.bin", "client.bin", "client-id.bin", "host.bin", "name.bin", "origin.bin", "bus.bin").forEach { File(root, it).delete() }
         hostsRoot.deleteRecursively()
         hostsRoot.mkdirs()
     }
@@ -104,7 +118,7 @@ internal class DshRelaySecrets(context: Context) {
     fun clear(hostId: String) {
         val dir = hostDir(hostId)
         if (hostId().orEmpty() == hostId) {
-            listOf("master.bin", "client.bin", "host.bin", "name.bin", "origin.bin", "bus.bin")
+            listOf("master.bin", "client.bin", "client-id.bin", "host.bin", "name.bin", "origin.bin", "bus.bin")
                 .forEach { File(root, it).delete() }
         }
         dir.deleteRecursively()
@@ -120,9 +134,11 @@ internal class DshRelaySecrets(context: Context) {
         hostId: String,
         hostName: String,
         relayOrigin: String,
+        clientId: String = "",
     ) {
         write("master.bin", masterKeyB64.toByteArray(), dir)
         write("client.bin", clientToken.toByteArray(), dir)
+        write("client-id.bin", clientId.toByteArray(), dir)
         write("host.bin", hostId.toByteArray(), dir)
         write("name.bin", hostName.toByteArray(), dir)
         write("origin.bin", relayOrigin.toByteArray(), dir)
