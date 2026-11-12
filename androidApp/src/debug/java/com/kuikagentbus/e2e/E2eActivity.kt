@@ -22,6 +22,11 @@ import kotlin.concurrent.thread
 class E2eActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (running) {
+            finish()
+            return
+        }
+        running = true
         val pairLink = intent?.getStringExtra("e2e_pair_b64")
             ?.let { runCatching { String(android.util.Base64.decode(it, android.util.Base64.NO_WRAP)) }.getOrNull() }
             ?: intent?.getStringExtra("e2e_pair").orEmpty()
@@ -189,5 +194,6 @@ class E2eActivity : Activity() {
 
     companion object {
         private const val TAG = "E2eDriver"
+        @Volatile private var running = false
     }
 }

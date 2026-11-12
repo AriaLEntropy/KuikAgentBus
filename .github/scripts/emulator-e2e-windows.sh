@@ -46,6 +46,7 @@ test -n "$LINK"
 LINK_B64=$(printf %s "$LINK" | base64 | tr -d '\n')
 
 $ADB install -r "$GITHUB_WORKSPACE/androidApp/build/outputs/apk/debug/androidApp-debug.apk"
+$ADB shell am force-stop com.kuikagentbus
 $ADB shell pm clear com.kuikagentbus
 $ADB shell pm grant com.kuikagentbus android.permission.POST_NOTIFICATIONS || true
 $ADB logcat -c
