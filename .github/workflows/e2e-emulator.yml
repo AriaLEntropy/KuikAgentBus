@@ -1,9 +1,10 @@
 name: e2e-emulator
 
 on:
+  # GitHub-hosted Linux runners have no KVM and no working ARM translation for
+  # this APK's arm64-only native libs. Keep this manual until a self-hosted
+  # runner with hardware acceleration is available; do not schedule a red job.
   workflow_dispatch:
-  schedule:
-    - cron: "0 18 * * *"
 
 jobs:
   emulator-e2e:
