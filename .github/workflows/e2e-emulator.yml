@@ -1,9 +1,12 @@
 name: e2e-emulator
 
 on:
-  # GitHub-hosted Linux runners have no KVM and no working ARM translation for
-  # this APK's arm64-only native libs. Keep this manual until a self-hosted
-  # runner with hardware acceleration is available; do not schedule a red job.
+  # Manual only:
+  # - hosted Linux has no KVM and cannot install this arm64-only APK;
+  # - hosted macOS is available but this private repo has no paid macOS
+  #   minutes, so macos-14 jobs are cancelled before a runner is assigned.
+  # Attach a self-hosted runner (Windows with WHPX, or a paid macOS runner)
+  # before re-enabling a schedule.
   workflow_dispatch:
 
 jobs:
