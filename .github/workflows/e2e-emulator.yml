@@ -16,8 +16,9 @@ jobs:
     timeout-minutes: 40
     env:
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
-      ANDROID_HOME: E:\Android
-      ANDROID_SDK_ROOT: E:\Android
+      ANDROID_HOME: 'E:\Android'
+      ANDROID_SDK_ROOT: 'E:\Android'
+      JAVA_HOME: 'C:\Program Files\Android\Android Studio\jbr'
     steps:
       - name: Checkout mobile
         uses: actions/checkout@v4
@@ -38,12 +39,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
-
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
 
       - name: Install and build host
         working-directory: host
