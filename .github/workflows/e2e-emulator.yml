@@ -9,7 +9,7 @@ jobs:
   emulator-e2e:
     name: android emulator protocol e2e
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
     env:
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
     steps:
@@ -64,14 +64,21 @@ jobs:
         env:
           AGENT_HOST_RELAY_DIR: ${{ github.workspace }}/relay-repo/relay
         with:
-          api-level: 34
-          target: google_apis
+          api-level: 30
+          target: default
           arch: x86_64
-          profile: pixel_5
+          profile: pixel_2
+          emulator-boot-timeout: 1200
           disable-animations: true
           emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect
           script: |
             set -euo pipefail
+            adb wait-for-device
+            for i in $(seq 1 300); do
+              [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ] && break
+              sleep 2
+            done
+            adb shell getprop sys.boot_completed | grep -q 1
             cd "$GITHUB_WORKSPACE/host"
             ./node_modules/.bin/tsx scripts/e2e-host.ts > e2e-host.log 2>&1 &
             HOST_PID=$!
