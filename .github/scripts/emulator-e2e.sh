@@ -15,7 +15,7 @@ for _ in $(seq 1 90); do
 done
 LINK=$(grep -o 'PAIR_LINK=.*' e2e-host.log | head -1 | cut -d= -f2-)
 test -n "$LINK"
-LINK_B64=$(printf %s "$LINK" | base64 -w0)
+LINK_B64=$(printf %s "$LINK" | base64 | tr -d '\n')
 
 adb install -r "$GITHUB_WORKSPACE/androidApp/build/outputs/apk/debug/androidApp-debug.apk"
 adb shell pm clear com.kuikagentbus
