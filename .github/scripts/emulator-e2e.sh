@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+export E2E_PORT=18787
+export E2E_PUBLIC_RELAY_URL=http://127.0.0.1:18787
+adb reverse tcp:18787 tcp:18787
 cd "$GITHUB_WORKSPACE/host"
 ./node_modules/.bin/tsx scripts/e2e-host.ts > e2e-host.log 2>&1 &
 HOST_PID=$!
