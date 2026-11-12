@@ -12,7 +12,7 @@ on:
 jobs:
   emulator-e2e:
     name: android emulator protocol e2e (Windows self-hosted)
-    runs-on: [self-hosted, windows, android]
+    runs-on: [self-hosted, Windows, android]
     timeout-minutes: 40
     env:
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
