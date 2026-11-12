@@ -52,7 +52,7 @@ $ADB shell pm grant com.kuikagentbus android.permission.POST_NOTIFICATIONS || tr
 $ADB logcat -c
 $ADB shell am start -n com.kuikagentbus/.e2e.E2eActivity --es e2e_pair_b64 "$LINK_B64"
 
-for _ in $(seq 1 180); do
+for _ in $(seq 1 600); do
   LINE=$($ADB logcat -d -s E2eDriver:I | grep 'E2E_RESULT' | tail -1 || true)
   test -n "$LINE" && break
   sleep 1

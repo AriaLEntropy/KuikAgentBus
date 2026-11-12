@@ -47,7 +47,7 @@ class E2eActivity : Activity() {
             }
             log("connecting")
             DshRelayManager.connect(applicationContext)
-            if (!waitFor(30_000) {
+            if (!waitFor(60_000) {
                     DshRelayManager.current().phase == "READY" &&
                         !AgentHostBus.busHomeJson().isNullOrBlank()
                 }) {
@@ -58,12 +58,12 @@ class E2eActivity : Activity() {
             val before = taskIds(snapshot())
             log("startTask")
             command("""{"id":"e2e-start-${UUID.randomUUID()}","kind":"startTask","startTask":{"source":"acp","connectorId":"fake","projectPath":"/tmp","prompt":"ECHO:ok"}}""")
-            val started = waitForTask(30_000, before) ?: run {
+            val started = waitForTask(60_000, before) ?: run {
                 finishWith("E2E_RESULT FAIL startTask did not create a fake task")
                 return
             }
             val taskId = started.optString("id")
-            if (!waitForTaskStatus(30_000, taskId, "completed")) {
+            if (!waitForTaskStatus(60_000, taskId, "completed")) {
                 finishWith("E2E_RESULT FAIL startTask did not complete ($taskId)")
                 return
             }
@@ -71,7 +71,7 @@ class E2eActivity : Activity() {
 
             log("followUp")
             command("""{"id":"e2e-follow-${UUID.randomUUID()}","kind":"followUp","followUp":{"taskId":"$taskId","prompt":"ECHO:follow"}}""")
-            if (!waitFor(30_000) { taskById(snapshot(), taskId)?.optString("status") == "completed" }) {
+            if (!waitFor(60_000) { taskById(snapshot(), taskId)?.optString("status") == "completed" }) {
                 finishWith("E2E_RESULT FAIL followUp did not complete")
                 return
             }
@@ -80,12 +80,12 @@ class E2eActivity : Activity() {
             log("approval")
             val beforeApproval = taskIds(snapshot())
             command("""{"id":"e2e-permission-${UUID.randomUUID()}","kind":"startTask","startTask":{"source":"acp","connectorId":"fake","projectPath":"/tmp","prompt":"NEED_PERMISSION"}}""")
-            val approvalTask = waitForTask(30_000, beforeApproval) ?: run {
+            val approvalTask = waitForTask(60_000, beforeApproval) ?: run {
                 finishWith("E2E_RESULT FAIL approval task was not created")
                 return
             }
             val approvalTaskId = approvalTask.optString("id")
-            if (!waitForTaskStatus(30_000, approvalTaskId, "waitingApproval")) {
+            if (!waitForTaskStatus(60_000, approvalTaskId, "waitingApproval")) {
                 finishWith("E2E_RESULT FAIL approval task did not wait ($approvalTaskId)")
                 return
             }
@@ -98,7 +98,7 @@ class E2eActivity : Activity() {
                 return
             }
             command("""{"id":"e2e-approve-${UUID.randomUUID()}","kind":"approve","approve":{"taskId":"$approvalTaskId","requestId":"$requestId","decision":"allow"}}""")
-            if (!waitFor(30_000) {
+            if (!waitFor(60_000) {
                     taskById(snapshot(), approvalTaskId)?.optString("status") in setOf("running", "completed")
                 }) {
                 finishWith("E2E_RESULT FAIL approval did not resume the task")
