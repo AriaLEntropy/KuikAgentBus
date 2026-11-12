@@ -11,11 +11,13 @@ on:
 
 jobs:
   emulator-e2e:
-    name: android emulator protocol e2e (macOS arm64)
-    runs-on: macos-14
+    name: android emulator protocol e2e (Windows self-hosted)
+    runs-on: [self-hosted, windows, android]
     timeout-minutes: 40
     env:
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      ANDROID_HOME: E:\Android
+      ANDROID_SDK_ROOT: E:\Android
     steps:
       - name: Checkout mobile
         uses: actions/checkout@v4
@@ -43,11 +45,6 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          packages: "platforms;android-34 build-tools;34.0.0 platform-tools"
-
       - name: Install and build host
         working-directory: host
         run: |
@@ -61,18 +58,8 @@ jobs:
           npm run build
 
       - name: Build debug APK
-        run: bash ./gradlew :androidApp:assembleDebug --no-daemon --console=plain
+        run: ./gradlew.bat :androidApp:assembleDebug --no-daemon --console=plain
 
       - name: Run emulator e2e
-        uses: reactivecircus/android-emulator-runner@v2
-        env:
-          AGENT_HOST_RELAY_DIR: ${{ github.workspace }}/relay-repo/relay
-        with:
-          api-level: 34
-          target: google_apis
-          arch: arm64-v8a
-          profile: pixel_5
-          emulator-boot-timeout: 1200
-          disable-animations: true
-          emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect
-          script: bash "$GITHUB_WORKSPACE/.github/scripts/emulator-e2e.sh"
+        shell: bash
+        run: bash .github/scripts/emulator-e2e-windows.sh
