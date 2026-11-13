@@ -91,6 +91,37 @@ class BusHomeApprovalModelTest {
         assertFalse(view.agents.first { it.key == "acp:opencode" }.canStartTask)
     }
 
+    // ---------- 新建任务默认项目 ----------
+
+    @Test
+    fun defaultProjectPrefersPinnedThenRecent() {
+        fun project(key: String, lastUsedAt: String, pinned: Boolean = false) =
+            BusHomeProject(key = key, name = key, path = "/$key", lastUsedAt = lastUsedAt, pinned = pinned)
+
+        val view = BusHomeView(
+            device = null,
+            agents = emptyList(),
+            tasks = emptyList(),
+            projects = listOf(
+                project("old", "2026-10-01T00:00:00Z"),
+                project("recent", "2026-11-13T00:00:00Z"),
+                project("pinned", "2026-01-01T00:00:00Z", pinned = true),
+            ),
+        )
+        assertEquals("pinned", view.defaultProject()?.key)
+
+        val unpinned = BusHomeView(
+            device = null,
+            agents = emptyList(),
+            tasks = emptyList(),
+            projects = listOf(
+                project("old", "2026-10-01T00:00:00Z"),
+                project("recent", "2026-11-13T00:00:00Z"),
+            ),
+        )
+        assertEquals("recent", unpinned.defaultProject()?.key)
+    }
+
     // ---------- 多选筛选 ----------
 
     @Test

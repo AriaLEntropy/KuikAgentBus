@@ -449,6 +449,18 @@ internal fun BusHomeView.approvalItems(agentKeys: Set<String>): List<BusApproval
         .distinctBy { it.key }
 
 /**
+ * 新建任务默认项目：置顶优先，其次最近使用（FR-8.1）。
+ *
+ * 直接用快照顺序会拿到最早加入列表的项目，临时目录也可能排在前面；
+ * 这里跟「按项目」视图用同一套排序。
+ */
+internal fun BusHomeView.defaultProject(): BusHomeProject? =
+    projects.sortedWith(
+        compareByDescending<BusHomeProject> { it.pinned }
+            .thenByDescending { it.lastUsedAt },
+    ).firstOrNull()
+
+/**
  * 按项目分组（多选）：与 [projectGroups] 单选版同一套排序规则，
  * 空集合 = 全部 Agent。
  */

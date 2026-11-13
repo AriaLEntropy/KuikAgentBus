@@ -764,7 +764,7 @@ internal class DshBusHomePage : BasePager() {
             ?: agents.firstOrNull { it.key == lastAgentKey }
             ?: agents.firstOrNull()
             ?: return
-        val project = homeView.projects.firstOrNull()
+        val project = homeView.defaultProject()
         val (model, effort) = defaultModelForAgent(agent)
         acquireModule<RouterModule>(RouterModule.MODULE_NAME).openPage(
             "bus_chat",
@@ -798,7 +798,7 @@ internal class DshBusHomePage : BasePager() {
         val (model, effort) = first?.let { defaultModelForAgent(it) } ?: ("" to "")
         newTaskModelId = model
         newTaskEffort = effort
-        newTaskProjectPath = homeView.projects.firstOrNull()?.path.orEmpty()
+        newTaskProjectPath = homeView.defaultProject()?.path.orEmpty()
         newTaskPrompt = ""
         newTaskError = ""
         newTaskBusy = false
