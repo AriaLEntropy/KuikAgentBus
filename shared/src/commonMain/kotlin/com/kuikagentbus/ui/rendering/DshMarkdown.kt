@@ -24,18 +24,8 @@ import com.tencent.kuiklybase.streaming.MarkdownBlock
 import com.tencent.kuiklybase.streaming.MarkdownStreamingState
 import com.tencent.kuikly.core.timer.setTimeout
 
-/**
- * 对话正文（问答）基准字号（pt）。
- * 行高、段间距、列表项间距等排版值全部按此字号的百分比推导，
- * 调整字号时整体节奏自动同步（对齐 Apple HIG Body 的阅读尺度）。
- */
-const val DSH_CHAT_BODY_FONT = 17f
-
-/** 行高相对字号的倍数（≈1.5 倍行距）。 */
+/** 代码与表格等小字号相对正文行高的倍数。 */
 private const val DSH_CHAT_LINE_RATIO = 1.5f
-
-/** 对话正文行高（pt），供问答两侧纯文本复用，保持与 Markdown 正文一致。 */
-const val DSH_CHAT_BODY_LINE = DSH_CHAT_BODY_FONT * DSH_CHAT_LINE_RATIO
 
 /** 段间距相对字号的倍数。 */
 private const val DSH_CHAT_BLOCK_RATIO = 0.75f
@@ -206,16 +196,16 @@ class DshMarkdownView : ComposeView<DshMarkdownAttr, ComposeEvent>() {
     private fun markdownConfig(): MarkdownConfig {
         val dark = attr.darkMode
         val text = if (dark) 0xFFF5F6F7 else 0xFF1F1F23
-        // 所有排版值均由正文基准字号按百分比推导，字号与行高/段间距同步缩放。
-        val body = DSH_CHAT_BODY_FONT
-        val line = body * DSH_CHAT_LINE_RATIO
+        // 正文与用户气泡共用同一套字号/行高；标题只做轻微层级，不压过正文
+        val body = attr.bodyFontSize
+        val line = attr.bodyLineHeight
         val small = body - 2f
         val smallLine = small * DSH_CHAT_LINE_RATIO
         val headingLine = 1.3f
-        val h1 = body * 1.6f
-        val h2 = body * 1.35f
-        val h3 = body * 1.2f
-        val h4 = body * 1.06f
+        val h1 = body * 1.25f
+        val h2 = body * 1.15f
+        val h3 = body * 1.08f
+        val h4 = body * 1.02f
         val block = body * DSH_CHAT_BLOCK_RATIO
         val listItemGap = body * DSH_CHAT_LIST_ITEM_RATIO
         return MarkdownConfig(
@@ -277,6 +267,8 @@ class DshMarkdownView : ComposeView<DshMarkdownAttr, ComposeEvent>() {
 
 class DshMarkdownAttr : ComposeAttr() {
     var contentWidth: Float by observable(0f)
+    var bodyFontSize: Float by observable(15f)
+    var bodyLineHeight: Float by observable(24.75f)
     var content: String by observable("")
     var streaming: Boolean by observable(false)
     var darkMode: Boolean by observable(false)
