@@ -334,8 +334,7 @@ private fun ViewContainer<*, *>.BusChatAssistantBody(
         DshMarkdown {
             attr {
                 this.contentWidth = width
-                bodyFontSize = BusChatTokens.bodySize
-                bodyLineHeight = BusChatTokens.bodyLine
+                typography = BusChatTokens.typography
                 this.content = content
                 this.streaming = streaming()
                 this.darkMode = palette.isDark

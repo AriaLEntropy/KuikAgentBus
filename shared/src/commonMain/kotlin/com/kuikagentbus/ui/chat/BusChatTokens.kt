@@ -1,6 +1,7 @@
 package com.kuikagentbus.ui.chat
 
 import com.kuikagentbus.theme.DshColorTokens
+import com.kuikagentbus.theme.DshTypography
 import com.tencent.kuikly.core.base.Color
 
 /**
@@ -168,9 +169,10 @@ internal object BusChatTokens {
     val bubblePaddingV: Float get() = px(9f)
     val bubblePaddingH: Float get() = px(14f)
 
-    /** 正文 15 / 1.65 */
-    val bodySize: Float get() = px(15f)
-    val bodyLine: Float get() = px(24.75f)
+    /** 正文 15 / 1.65，语义字号来自 [DshTypography] */
+    internal val typography: DshTypography get() = DshTypography.Default.scaled(designScale)
+    val bodySize: Float get() = typography.body.size
+    val bodyLine: Float get() = typography.body.lineHeight
 
     /** 正文段间距 9 */
     val paragraphGap: Float get() = px(9f)

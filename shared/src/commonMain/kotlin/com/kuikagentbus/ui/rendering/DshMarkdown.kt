@@ -1,6 +1,7 @@
 package com.kuikagentbus.ui.rendering
 
 import com.kuikagentbus.base.BridgeModule
+import com.kuikagentbus.theme.DshTypography
 import com.tencent.kuikly.core.base.ComposeAttr
 import com.tencent.kuikly.core.base.ComposeEvent
 import com.tencent.kuikly.core.base.ComposeView
@@ -23,9 +24,6 @@ import com.tencent.kuiklybase.config.TextStyleConfig
 import com.tencent.kuiklybase.streaming.MarkdownBlock
 import com.tencent.kuiklybase.streaming.MarkdownStreamingState
 import com.tencent.kuikly.core.timer.setTimeout
-
-/** 代码与表格等小字号相对正文行高的倍数。 */
-private const val DSH_CHAT_LINE_RATIO = 1.5f
 
 /** 段间距相对字号的倍数。 */
 private const val DSH_CHAT_BLOCK_RATIO = 1.2f
@@ -193,16 +191,17 @@ class DshMarkdownView : ComposeView<DshMarkdownAttr, ComposeEvent>() {
     private fun markdownConfig(): MarkdownConfig {
         val dark = attr.darkMode
         val text = if (dark) 0xFFF5F6F7 else 0xFF1F1F23
-        // 正文与用户气泡共用同一套字号/行高；标题只做轻微层级，不压过正文
-        val body = attr.bodyFontSize
-        val line = attr.bodyLineHeight
-        val small = body - 2f
-        val smallLine = small * DSH_CHAT_LINE_RATIO
-        val headingLine = 1.3f
-        val h1 = body * 1.25f
-        val h2 = body * 1.15f
-        val h3 = body * 1.08f
-        val h4 = body * 1.02f
+        // 正文与用户气泡共用同一套语义字号；标题层级由 DshTypography 给出
+        val type = attr.typography
+        val body = type.body.size
+        val line = type.body.lineHeight
+        val code = type.code
+        val label = type.label
+        val h1 = type.heading(1)
+        val h2 = type.heading(2)
+        val h3 = type.heading(3)
+        val h4 = type.heading(4)
+        val h5 = type.heading(5)
         val block = body * DSH_CHAT_BLOCK_RATIO
         return MarkdownConfig(
             colors = MarkdownColors(
@@ -219,19 +218,19 @@ class DshMarkdownView : ComposeView<DshMarkdownAttr, ComposeEvent>() {
             typography = MarkdownTypography(
                 text = TextStyleConfig(fontSize = body, color = text, lineHeight = line),
                 paragraph = TextStyleConfig(fontSize = body, color = text, lineHeight = line),
-                code = TextStyleConfig(fontSize = small, fontFamily = "monospace", lineHeight = smallLine),
-                inlineCode = TextStyleConfig(fontSize = small, fontFamily = "monospace"),
-                h1 = TextStyleConfig(fontSize = h1, fontWeight = FontWeight.Bold, color = text, lineHeight = h1 * headingLine),
-                h2 = TextStyleConfig(fontSize = h2, fontWeight = FontWeight.Bold, color = text, lineHeight = h2 * headingLine),
-                h3 = TextStyleConfig(fontSize = h3, fontWeight = FontWeight.SemiBold, color = text, lineHeight = h3 * headingLine),
-                h4 = TextStyleConfig(fontSize = h4, fontWeight = FontWeight.SemiBold, color = text, lineHeight = h4 * headingLine),
-                h5 = TextStyleConfig(fontSize = body, fontWeight = FontWeight.SemiBold, color = text, lineHeight = body * headingLine),
-                h6 = TextStyleConfig(fontSize = body, fontWeight = FontWeight.SemiBold, color = text, lineHeight = body * headingLine),
+                code = TextStyleConfig(fontSize = code.size, fontFamily = "monospace", lineHeight = code.lineHeight),
+                inlineCode = TextStyleConfig(fontSize = code.size, fontFamily = "monospace"),
+                h1 = TextStyleConfig(fontSize = h1.size, fontWeight = FontWeight.Bold, color = text, lineHeight = h1.lineHeight),
+                h2 = TextStyleConfig(fontSize = h2.size, fontWeight = FontWeight.Bold, color = text, lineHeight = h2.lineHeight),
+                h3 = TextStyleConfig(fontSize = h3.size, fontWeight = FontWeight.SemiBold, color = text, lineHeight = h3.lineHeight),
+                h4 = TextStyleConfig(fontSize = h4.size, fontWeight = FontWeight.SemiBold, color = text, lineHeight = h4.lineHeight),
+                h5 = TextStyleConfig(fontSize = h5.size, fontWeight = FontWeight.SemiBold, color = text, lineHeight = h5.lineHeight),
+                h6 = TextStyleConfig(fontSize = h5.size, fontWeight = FontWeight.SemiBold, color = text, lineHeight = h5.lineHeight),
                 quote = TextStyleConfig(fontSize = body, color = if (dark) 0xFFB7BBC2 else 0xFF61666D, lineHeight = line * 0.95f),
                 ordered = TextStyleConfig(fontSize = body, color = text, lineHeight = line),
                 bullet = TextStyleConfig(fontSize = body, color = text, lineHeight = line),
                 list = TextStyleConfig(fontSize = body, color = text, lineHeight = line),
-                table = TextStyleConfig(fontSize = body - 4f, color = text, lineHeight = (body - 4f) * DSH_CHAT_LINE_RATIO),
+                table = TextStyleConfig(fontSize = label.size, color = text, lineHeight = label.lineHeight),
                 textLink = TextStyleConfig(fontSize = body, color = if (dark) 0xFF78A4F8 else 0xFF4176E6, lineHeight = line),
             ),
             dimens = MarkdownDimens(
@@ -263,8 +262,7 @@ class DshMarkdownView : ComposeView<DshMarkdownAttr, ComposeEvent>() {
 
 class DshMarkdownAttr : ComposeAttr() {
     var contentWidth: Float by observable(0f)
-    var bodyFontSize: Float by observable(15f)
-    var bodyLineHeight: Float by observable(24.75f)
+    var typography: DshTypography by observable(DshTypography.Default)
     var content: String by observable("")
     var streaming: Boolean by observable(false)
     var darkMode: Boolean by observable(false)
