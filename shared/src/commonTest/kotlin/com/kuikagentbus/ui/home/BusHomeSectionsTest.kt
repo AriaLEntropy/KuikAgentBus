@@ -135,7 +135,13 @@ class BusHomeSectionsTest {
         )
         val rows = busTaskAreaProjectRows(groups, collapsed = emptySet())
         assertEquals(
-            listOf("project-a", "task-a1", "task-a2", "project-b", "task-b1"),
+            listOf(
+                "project-a-true",
+                "task-a1--running-false",
+                "task-a2--completed-false",
+                "project-b-true",
+                "task-b1--completed-false",
+            ),
             rows.map { it.key },
         )
         // 一张卡：只有整列首尾带圆角
@@ -153,8 +159,11 @@ class BusHomeSectionsTest {
             BusHomeProjectGroup("a", "AgentBus", listOf(task("a1", "running", false)), "/a"),
             BusHomeProjectGroup("b", "Notes", listOf(task("b1", "completed", false)), "/b"),
         )
-        val rows = busTaskAreaProjectRows(groups, collapsed = setOf("b"))
-        assertEquals(listOf("project-a", "task-a1", "project-b"), rows.map { it.key })
+        val rows = busTaskAreaProjectRows(groups, collapsed = setOf("/b"))
+        assertEquals(
+            listOf("project-a-true", "task-a1--running-false", "project-b-false"),
+            rows.map { it.key },
+        )
         val folded = rows.last() as BusTaskAreaRow.GroupHeader
         assertFalse(folded.expanded)
     }
