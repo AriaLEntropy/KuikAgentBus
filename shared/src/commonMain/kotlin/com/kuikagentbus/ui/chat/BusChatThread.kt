@@ -4,6 +4,7 @@ import com.kuikagentbus.data.message.DshMessageAttachment
 import com.kuikagentbus.data.message.DshMessageFileRef
 import com.kuikagentbus.data.message.DshMessageRole
 import com.kuikagentbus.ui.home.BusApprovalQuestion
+import com.kuikagentbus.ui.rendering.DshMarkdown
 import com.tencent.kuikly.core.base.Border
 import com.tencent.kuikly.core.layout.FlexWrap
 import com.tencent.kuikly.core.base.BorderRectRadius
@@ -324,19 +325,19 @@ private fun ViewContainer<*, *>.BusChatAssistantBody(
     fileState: (DshMessageFileRef) -> BusChatFileState,
     onOpenFile: (DshMessageFileRef) -> Unit,
 ) {
-    val blocks = busChatBlocks(content)
+    val width = contentWidth.coerceAtLeast(0f)
     View {
         attr {
-            width(contentWidth)
+            width(width)
             flexDirectionColumn()
         }
-        blocks.forEachIndexed { index, block ->
-            BusChatBlockView(
-                block = block,
-                first = index == 0,
-                last = index == blocks.lastIndex && files.isEmpty(),
-                palette = palette,
-            )
+        DshMarkdown {
+            attr {
+                this.contentWidth = width
+                this.content = content
+                this.streaming = streaming()
+                this.darkMode = palette.isDark
+            }
         }
         // 光标是 2×16 的实心竖条，只能挂在最后一块之后；行内跟字太靠近会压住标点，
         // 所以留 2 的间距，看起来仍然贴着正文
