@@ -157,11 +157,11 @@ internal fun ViewContainer<*, *>.BusChatComposer(
                 }
             }
         }
-        // 草稿态：键盘弹起时从输入条上方长出「选择工作区 / 选择 Agent」两行
-        // 键盘收起或已创建会话时高度收回 0，不占位
+        // 草稿态：输入条上方固定显示「选择工作区 / 选择 Agent」两行
+        // 第一条消息发出前随时可以回来改；已创建会话后整行不占位
         View {
             attr {
-                val show = draftMode() && keyboardUp() && !readOnly()
+                val show = draftMode() && !readOnly()
                 val h = if (show) busChatPx(62f) else 0f
                 height(h)
                 overflow(true)
@@ -173,7 +173,8 @@ internal fun ViewContainer<*, *>.BusChatComposer(
             }
             // 点芯片行空白处也收起键盘；芯片本身的 click 会吃掉事件
             event { click { onBackgroundTap() } }
-            vbind({ workspaceLabel().isBlank() }) {
+            // 标签本身也是可观察值：换工作区/Agent 后要重建这两枚芯片
+            vbind({ workspaceLabel() }) {
                 BusChatDraftChoice(
                     palette = palette,
                     asset = "folder.svg",
@@ -183,7 +184,7 @@ internal fun ViewContainer<*, *>.BusChatComposer(
                     onClick = onWorkspace,
                 )
             }
-            vbind({ agentName().isBlank() }) {
+            vbind({ agentName() }) {
                 BusChatDraftChoice(
                     palette = palette,
                     asset = if (agentName().isBlank()) "agent-default.svg" else "",
