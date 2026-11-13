@@ -71,29 +71,24 @@ class BusHomeApprovalModelTest {
         assertEquals(original, roundTripped)
     }
 
-    // ---------- canStartTask 派生 ----------
+    // ---------- canStartTask 映射 ----------
 
     @Test
-    fun canStartTaskDerivesFromAvailableEnabledAndSource() {
-        assertTrue(busAgentCanStartTask(available = true, enabled = true, source = "acp"))
-        assertTrue(busAgentCanStartTask(available = true, enabled = true, source = "dsh"))
-        // 只有 acp / dsh 能在手机上直接发起：电脑端专属的连接器不可
-        assertFalse(busAgentCanStartTask(available = true, enabled = true, source = "codex"))
-        assertFalse(busAgentCanStartTask(available = true, enabled = true, source = "claude"))
-        assertFalse(busAgentCanStartTask(available = false, enabled = true, source = "acp"))
-        assertFalse(busAgentCanStartTask(available = true, enabled = false, source = "acp"))
-        assertFalse(busAgentCanStartTask(available = true, enabled = true, source = ""))
+    fun canStartTaskHonorsDeclaredFalse() {
+        assertTrue(busAgentCanStartTask(available = true, enabled = true, declared = true))
+        assertFalse(busAgentCanStartTask(available = true, enabled = true, declared = false))
+        assertFalse(busAgentCanStartTask(available = false, enabled = true, declared = true))
+        assertFalse(busAgentCanStartTask(available = true, enabled = false, declared = true))
     }
 
     @Test
-    fun agentModelExposesCanStartTaskAndMatchesPageRule() {
+    fun agentModelDefaultsToStartableWhenFieldIsOmitted() {
         val view = previewBusHomeView()
-        assertEquals(
-            view.agents.filter { it.available && it.enabled && (it.source == "acp" || it.source == "dsh") },
-            view.agents.filter { it.canStartTask },
-        )
+        // 省略 canStartTask = 能从手机新建：Claude Code、Codex 都该出现
         assertTrue(view.agents.first { it.key == "acp:claude-code" }.canStartTask)
-        assertFalse(view.agents.first { it.key == "codex" }.canStartTask)
+        assertTrue(view.agents.first { it.key == "codex" }.canStartTask)
+        // 显式 false 的连接器不出现
+        assertFalse(view.agents.first { it.key == "acp:opencode" }.canStartTask)
     }
 
     // ---------- 多选筛选 ----------

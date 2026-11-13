@@ -81,18 +81,21 @@ internal data class BusHomeAgent(
     val canAutoApprove: Boolean = false,
     /** 协议 3.10 起：这台电脑能按连接器 / 项目查技能目录 */
     val canListSkills: Boolean = false,
-) {
     /**
-     * 能不能在这个 Agent 上直接发起任务。wire 上没有这个字段，按页面既有判断派生：
-     * 可用 + 已启用 + 来源是 acp 或 dsh（codex / claude 等只在电脑上启动）。
+     * 能不能在这个 Agent 上直接发起任务。
+     *
+     * 协议 2.13 起由连接器声明 `canStartTask`：只写 `false`，能新建时整个键省略。
+     * 这里只把「可用、已启用、没被显式禁止」三者合起来，不再按来源猜。
      */
-    val canStartTask: Boolean
-        get() = busAgentCanStartTask(available, enabled, source)
-}
+    val canStartTask: Boolean = true,
+)
 
 /** [BusHomeAgent.canStartTask] 的纯函数版本，页面与单测共用。 */
-internal fun busAgentCanStartTask(available: Boolean, enabled: Boolean, source: String): Boolean =
-    available && enabled && (source == "acp" || source == "dsh")
+internal fun busAgentCanStartTask(
+    available: Boolean,
+    enabled: Boolean,
+    declared: Boolean,
+): Boolean = available && enabled && declared
 
 internal data class BusHomeDevice(
     val agentId: String,
@@ -169,12 +172,14 @@ internal fun BusStore.toHomeView(): BusHomeView {
     val agents = connectors.map { connector ->
         val kind = connector.string("kind").orEmpty()
         val connectorId = connector.string("connectorId")
+        val available = connector.string("available")?.toBooleanStrictOrNull() == true
+        val enabled = connector.string("enabled")?.toBooleanStrictOrNull() != false
         BusHomeAgent(
             key = connectorKey(kind, connectorId),
             name = connector.string("displayName").orEmpty()
                 .ifBlank { agentLabel(kind, connectorId) },
-            available = connector.string("available")?.toBooleanStrictOrNull() == true,
-            enabled = connector.string("enabled")?.toBooleanStrictOrNull() != false,
+            available = available,
+            enabled = enabled,
             status = connector.string("status").orEmpty(),
             source = kind,
             connectorId = connectorId,
@@ -201,6 +206,13 @@ internal fun BusStore.toHomeView(): BusHomeView {
                 ?.toBooleanStrictOrNull() == true,
             canListSkills = connector.string("canListSkills")
                 ?.toBooleanStrictOrNull() == true,
+            // 协议 2.13：连接器只写 false；键缺省表示可以从手机新建
+            canStartTask = busAgentCanStartTask(
+                available = available,
+                enabled = enabled,
+                declared = connector.string("canStartTask")
+                    ?.toBooleanStrictOrNull() != false,
+            ),
         )
     }
     val projects = projects.mapNotNull { project ->

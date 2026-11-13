@@ -33,7 +33,7 @@ internal val BUS_HOME_FIXTURE_JSON = """
             {"kind":"acp","connectorId":"claude-code","displayName":"Claude Code","available":true,"enabled":true,"status":"ok","taskCount":1,"canDeleteTasks":true,"canAutoApprove":true},
             {"kind":"codex","displayName":"Codex","available":true,"enabled":true,"status":"ok","taskCount":1,"canDeleteTasks":true},
             {"kind":"dsh","displayName":"DeepSeek Harness","available":true,"enabled":true,"status":"ok","taskCount":2},
-            {"kind":"acp","connectorId":"opencode","displayName":"OpenCode","available":true,"enabled":true,"status":"ok","taskCount":1}
+            {"kind":"acp","connectorId":"opencode","displayName":"OpenCode","available":true,"enabled":true,"status":"ok","taskCount":1,"canStartTask":false}
           ]
         }
       ],
