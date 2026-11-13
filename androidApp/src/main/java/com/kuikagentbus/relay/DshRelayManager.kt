@@ -106,11 +106,16 @@ internal object DshRelayManager {
         return try {
             val link = parsePairQr(qr)
             val claimToken = SealedTunnelCrypto.deriveClaimToken(link.masterKey)
+            val deviceName = Build.MODEL?.trim().takeUnless { it.isNullOrBlank() } ?: "Android"
             val body = JSONObject()
                 .put("pairId", link.pairId)
                 .put("claimToken", claimToken)
-                .put("deviceLabel", Build.MODEL?.trim().takeUnless { it.isNullOrBlank() } ?: "Android")
+                .put("deviceLabel", deviceName)
                 .put("platform", "android")
+                .put(
+                    "sealedName",
+                    SealedNameCrypto.seal(link.masterKey, deviceName) ?: "",
+                )
             val response = http.newCall(
                 Request.Builder()
                     .url("${link.origin}/pair/claim-device")
@@ -243,6 +248,69 @@ internal object DshRelayManager {
         if (targetHostId == hostId) forget() else secrets?.clear(targetHostId)
     }
 
+    /** FR-3.6：本组手机列表；sealedName 在这里解开成 name */
+    fun pairClients(): Pair<Int, String> {
+        val (status, json) = relayCall("GET", "/pair/clients")
+        if (status != 200 || json.isBlank()) return status to json
+        return runCatching {
+            val master = secrets?.masterKey() ?: return status to json
+            val root = JSONObject(json)
+            val clients = root.optJSONArray("clients") ?: return status to json
+            val decoded = org.json.JSONArray()
+            for (index in 0 until clients.length()) {
+                val item = clients.optJSONObject(index) ?: continue
+                val sealed = item.optString("sealedName")
+                val name = SealedNameCrypto.open(master, sealed)
+                    ?.takeIf { it.isNotBlank() }
+                    ?: "手机"
+                item.put("name", name)
+                decoded.put(item)
+            }
+            root.put("clients", decoded)
+            status to root.toString()
+        }.getOrDefault(status to json)
+    }
+
+    /** 把本机名字以密文同步到 Relay；旧配对第一次连上时补一次 */
+    fun pairSetName(name: String): Boolean {
+        val stored = secrets ?: return false
+        val master = stored.masterKey() ?: return false
+        val sealed = SealedNameCrypto.seal(master, name) ?: return false
+        val body = JSONObject().put("sealedName", sealed).toString()
+        return relayCall("POST", "/pair/clients/name", body).first in 200..299
+    }
+
+    /** FR-3.6：移除另一台手机 */
+    fun pairRemoveClient(clientId: String): Int =
+        relayCall("DELETE", "/pair/clients/$clientId").first
+
+    /** FR-3.6：解散整组 */
+    fun pairRevoke(): Int = relayCall("POST", "/pair/revoke").first
+
+    /** FR-3.6：移除电脑 */
+    fun pairRemoveAgent(agentId: String): Int =
+        relayCall("DELETE", "/pair/agents/$agentId").first
+
+    private fun relayCall(method: String, path: String, body: String? = null): Pair<Int, String> {
+        val stored = secrets ?: return 0 to ""
+        val clientToken = stored.clientToken() ?: return 0 to ""
+        val origin = stored.relayOrigin().orEmpty().ifBlank { relayOrigin.ifBlank { "http://127.0.0.1:8787" } }
+        return runCatching {
+            val builder = Request.Builder()
+                .url("$origin$path")
+                .header("Authorization", "Bearer $clientToken")
+                .header("User-Agent", androidUserAgent())
+            when (method) {
+                "GET" -> builder.get()
+                "DELETE" -> builder.delete()
+                else -> builder.post((body ?: "{}").toRequestBody(jsonMedia))
+            }
+            http.newCall(builder.build()).execute().use { response ->
+                response.code to response.body?.string().orEmpty()
+            }
+        }.getOrDefault(0 to "")
+    }
+
     private fun connectInternal() {
         val myGeneration = generation.incrementAndGet()
         dropSocket()
@@ -283,6 +351,9 @@ internal object DshRelayManager {
             if (ticketClientId.isNotBlank()) stored.saveClientId(ticketClientId)
             require(ticket.isNotBlank() && sessionId.isNotBlank()) { "ticket response incomplete" }
             accessSessionId = sessionId
+            thread(name = "agentbus-pair-name") {
+                pairSetName(Build.MODEL?.trim().takeUnless { it.isNullOrBlank() } ?: "Android")
+            }
             publish(state.copy(phase = "HANDSHAKING", message = "正在建立加密隧道", generation = myGeneration, hostId = hostId, hostName = hostName, relayOrigin = origin, clientId = ticketClientId, paired = true))
             val clientRandomB64 = SealedTunnelCrypto.encodeBase64Url(SealedTunnelCrypto.randomBytes())
             val hello = envelope(

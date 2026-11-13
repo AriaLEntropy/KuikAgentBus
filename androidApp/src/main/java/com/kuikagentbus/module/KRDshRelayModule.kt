@@ -81,6 +81,38 @@ internal class KRDshRelayModule : KuiklyRenderBaseModule() {
             }
             null
         }
+        "pairClients" -> {
+            thread(name = "relay-pair-clients") {
+                val (status, json) = DshRelayManager.pairClients()
+                activity?.runOnUiThread {
+                    callback?.invoke(mapOf("status" to status, "json" to json))
+                }
+            }
+            null
+        }
+        "pairRemoveClient" -> {
+            val clientId = runCatching { JSONObject(params ?: "{}").optString("clientId") }.getOrDefault("")
+            thread(name = "relay-pair-remove-client") {
+                val status = if (clientId.isBlank()) 0 else DshRelayManager.pairRemoveClient(clientId)
+                activity?.runOnUiThread { callback?.invoke(mapOf("status" to status)) }
+            }
+            null
+        }
+        "pairRevokeGroup" -> {
+            thread(name = "relay-pair-revoke") {
+                val status = DshRelayManager.pairRevoke()
+                activity?.runOnUiThread { callback?.invoke(mapOf("status" to status)) }
+            }
+            null
+        }
+        "pairRemoveAgent" -> {
+            val agentId = runCatching { JSONObject(params ?: "{}").optString("agentId") }.getOrDefault("")
+            thread(name = "relay-pair-remove-agent") {
+                val status = if (agentId.isBlank()) 0 else DshRelayManager.pairRemoveAgent(agentId)
+                activity?.runOnUiThread { callback?.invoke(mapOf("status" to status)) }
+            }
+            null
+        }
         "busTaskMessages" -> {
             val taskId = runCatching { JSONObject(params ?: "{}").optString("taskId") }.getOrDefault("")
             mapOf("json" to (AgentHostBus.taskMessagesJson(taskId) ?: ""))

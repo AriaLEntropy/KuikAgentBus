@@ -131,6 +131,36 @@ class DshRelayModule : Module() {
         }, false)
     }
 
+    /** FR-3.6：本组手机列表（Relay /pair/clients，手机名已解密） */
+    fun pairClients(onResult: (status: Int, json: String) -> Unit) {
+        toNative(true, "pairClients", null, { value ->
+            onResult(value?.optInt("status") ?: 0, value?.optString("json").orEmpty())
+        }, false)
+    }
+
+    /** FR-3.6：移除另一台手机 */
+    fun pairRemoveClient(clientId: String, onResult: (Int) -> Unit) {
+        val params = JSONObject().apply { put("clientId", clientId) }
+        toNative(true, "pairRemoveClient", params.toString(), { value ->
+            onResult(value?.optInt("status") ?: 0)
+        }, false)
+    }
+
+    /** FR-3.6：解散整组 */
+    fun pairRevokeGroup(onResult: (Int) -> Unit) {
+        toNative(true, "pairRevokeGroup", null, { value ->
+            onResult(value?.optInt("status") ?: 0)
+        }, false)
+    }
+
+    /** FR-3.6：移除电脑 */
+    fun pairRemoveAgent(agentId: String, onResult: (Int) -> Unit) {
+        val params = JSONObject().apply { put("agentId", agentId) }
+        toNative(true, "pairRemoveAgent", params.toString(), { value ->
+            onResult(value?.optInt("status") ?: 0)
+        }, false)
+    }
+
     /** FR-10.1：取最近一条 notify 的 JSON；读完即清。 */
     fun busTakeNotify(): String? {
         val raw = toNative(false, "busTakeNotify", null, null, true).toString()

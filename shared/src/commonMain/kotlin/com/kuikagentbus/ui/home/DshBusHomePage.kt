@@ -288,12 +288,12 @@ internal class DshBusHomePage : BasePager() {
         settingsPhonesError = ""
         settingsPhonesRevision++
         runCatching {
-            acquireModule<DshRelayModule>(DshRelayModule.MODULE_NAME).busDevices { json ->
+            acquireModule<DshRelayModule>(DshRelayModule.MODULE_NAME).pairClients { status, json ->
                 setTimeout(pagerId, 0) {
                     settingsPhonesLoading = false
                     settingsPhonesRevision++
                     if (!alive) return@setTimeout
-                    if (json.isBlank()) {
+                    if (status != 200 || json.isBlank()) {
                         settingsPhonesError = "电脑未连接或未配对"
                         return@setTimeout
                     }
@@ -328,7 +328,7 @@ internal class DshBusHomePage : BasePager() {
         revokeGroupBusy = true
         revokeGroupError = ""
         runCatching {
-            acquireModule<DshRelayModule>(DshRelayModule.MODULE_NAME).busRevokeGroup { status ->
+            acquireModule<DshRelayModule>(DshRelayModule.MODULE_NAME).pairRevokeGroup { status ->
                 setTimeout(pagerId, 0) {
                     revokeGroupBusy = false
                     when (status) {
@@ -347,7 +347,7 @@ internal class DshBusHomePage : BasePager() {
 
     private fun parseSettingsPhones(json: String): List<BusSettingsPhone> {
         val root = busParse(json).jsonObject
-        val list = root["devices"] as? JsonArray ?: return emptyList()
+        val list = root["clients"] as? JsonArray ?: return emptyList()
         val mine = runCatching {
             acquireModule<DshRelayModule>(DshRelayModule.MODULE_NAME).status().clientId
         }.getOrDefault("")
@@ -356,12 +356,13 @@ internal class DshBusHomePage : BasePager() {
             val id = (phone["id"] as? JsonPrimitive)?.contentOrNull ?: return@mapNotNull null
             BusSettingsPhone(
                 id = id,
-                name = (phone["deviceLabel"] as? JsonPrimitive)?.contentOrNull
+                name = (phone["name"] as? JsonPrimitive)?.contentOrNull
                     .orEmpty()
                     .ifBlank { "手机" },
                 platform = (phone["platform"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
                 online = (phone["online"] as? JsonPrimitive)?.booleanOrNull == true,
-                mine = mine.isNotBlank() && id == mine,
+                mine = (phone["current"] as? JsonPrimitive)?.booleanOrNull == true ||
+                    (mine.isNotBlank() && id == mine),
             )
         }
     }
@@ -380,7 +381,7 @@ internal class DshBusHomePage : BasePager() {
         removePhoneBusy = true
         removePhoneError = ""
         runCatching {
-            acquireModule<DshRelayModule>(DshRelayModule.MODULE_NAME).busRemoveDevice(id) { status ->
+            acquireModule<DshRelayModule>(DshRelayModule.MODULE_NAME).pairRemoveClient(id) { status ->
                 setTimeout(pagerId, 0) {
                     removePhoneBusy = false
                     when (status) {
@@ -1016,23 +1017,44 @@ internal class DshBusHomePage : BasePager() {
         val removedHostId = knownHostId()
         removeBusy = true
         removeError = ""
+        val finish = {
+            runCatching {
+                acquireModule<DshRelayModule>(DshRelayModule.MODULE_NAME).forget { ok ->
+                    setTimeout(pagerId, 0) {
+                        removeBusy = false
+                        if (!ok) {
+                            removeError = "移除失败，请重试"
+                            return@setTimeout
+                        }
+                        runCatching { store?.clearRelayProfile() }
+                        clearHostCache(removedHostId)
+                        localHostName = ""
+                        showRemoveComputer = false
+                        showSettings = false
+                        homeView = BusHomeView(device = null, agents = emptyList(), tasks = emptyList())
+                        everLoaded = false
+                        waitingTooLong = false
+                        acquireModule<RouterModule>(RouterModule.MODULE_NAME).closePage()
+                    }
+                }
+            }.onFailure {
+                removeBusy = false
+                removeError = it.message ?: "移除失败"
+            }
+        }
+        if (removedHostId.isBlank()) {
+            finish()
+            return
+        }
         runCatching {
-            acquireModule<DshRelayModule>(DshRelayModule.MODULE_NAME).forget { ok ->
+            acquireModule<DshRelayModule>(DshRelayModule.MODULE_NAME).pairRemoveAgent(removedHostId) { status ->
                 setTimeout(pagerId, 0) {
-                    removeBusy = false
-                    if (!ok) {
-                        removeError = "移除失败，请重试"
+                    if (status != 204 && status != 404) {
+                        removeBusy = false
+                        removeError = if (status == 0) "电脑已断开，暂时无法移除" else "移除失败（$status）"
                         return@setTimeout
                     }
-                    runCatching { store?.clearRelayProfile() }
-                    clearHostCache(removedHostId)
-                    localHostName = ""
-                    showRemoveComputer = false
-                    showSettings = false
-                    homeView = BusHomeView(device = null, agents = emptyList(), tasks = emptyList())
-                    everLoaded = false
-                    waitingTooLong = false
-                    acquireModule<RouterModule>(RouterModule.MODULE_NAME).closePage()
+                    finish()
                 }
             }
         }.onFailure {
