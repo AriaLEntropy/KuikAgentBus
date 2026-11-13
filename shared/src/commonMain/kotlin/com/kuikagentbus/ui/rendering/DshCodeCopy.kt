@@ -56,8 +56,6 @@ fun ViewContainer<*, *>.dshCodeFenceBlock(
         attr {
             backgroundColor(config.colors.codeBackground)
             borderRadius(config.dimens.codeBackgroundCornerSize)
-            marginTop(config.padding.block)
-            marginBottom(config.padding.block)
             val p = config.padding.codeBlock
             padding(p, p, p, p)
         }

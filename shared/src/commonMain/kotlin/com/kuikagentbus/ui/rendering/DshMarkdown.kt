@@ -28,10 +28,7 @@ import com.tencent.kuikly.core.timer.setTimeout
 private const val DSH_CHAT_LINE_RATIO = 1.5f
 
 /** 段间距相对字号的倍数。 */
-private const val DSH_CHAT_BLOCK_RATIO = 0.75f
-
-/** 列表项间距相对字号的倍数（上下各取一半）。 */
-private const val DSH_CHAT_LIST_ITEM_RATIO = 0.3f
+private const val DSH_CHAT_BLOCK_RATIO = 1.2f
 
 /** DSH theme wrapper around KuiklyMarkdown's streaming renderer. */
 class DshMarkdownView : ComposeView<DshMarkdownAttr, ComposeEvent>() {
@@ -207,7 +204,6 @@ class DshMarkdownView : ComposeView<DshMarkdownAttr, ComposeEvent>() {
         val h3 = body * 1.08f
         val h4 = body * 1.02f
         val block = body * DSH_CHAT_BLOCK_RATIO
-        val listItemGap = body * DSH_CHAT_LIST_ITEM_RATIO
         return MarkdownConfig(
             colors = MarkdownColors(
                 text = text,
@@ -253,10 +249,10 @@ class DshMarkdownView : ComposeView<DshMarkdownAttr, ComposeEvent>() {
                 // 段间距、列表间距等均按正文基准字号的百分比推导
                 block = block,
                 list = body * 0.5f,
-                listItemTop = listItemGap,
-                listItemBottom = listItemGap,
+                listItemTop = 0f,
+                listItemBottom = 0f,
                 listIndent = body * 1.2f,
-                codeBlock = block,
+                codeBlock = 8f,
                 blockQuotePaddingLeft = block,
                 blockQuoteBarPaddingLeft = body * 0.25f,
                 blockQuoteTextVertical = body * 0.5f,
