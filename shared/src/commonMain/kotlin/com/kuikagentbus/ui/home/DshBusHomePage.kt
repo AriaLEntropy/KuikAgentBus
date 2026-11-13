@@ -449,7 +449,6 @@ internal class DshBusHomePage : BasePager() {
             if (!collapsedProjects.contains(key)) collapsedProjects.add(key)
         }
         syncTaskRows(force = true)
-        listRevision++
     }
 
     /**
@@ -464,11 +463,13 @@ internal class DshBusHomePage : BasePager() {
         } else {
             busTaskAreaRecentRows(visibleTasks())
         }
-        if (force) {
-            // 展开/收起改变的是同一组里“有没有任务行”，diffUpdate 只按行身份复用，
-            // 会把折叠/展开的变化吞掉；这里直接重建，保证分组头和任务一起换。
+        // 行身份只认任务 id / 分组 key：状态、时间、摘要变化留给 diffUpdate。
+        // 新增、移除或排序变化必须重建列表，vforLazy 不会因为插入一行而刷新条数。
+        val structural = force || !sameTaskAreaRowOrder(taskRows, nextRows)
+        if (structural) {
             taskRows.clear()
             taskRows.addAll(nextRows)
+            listRevision++
         } else {
             taskRows.diffUpdate(nextRows)
         }

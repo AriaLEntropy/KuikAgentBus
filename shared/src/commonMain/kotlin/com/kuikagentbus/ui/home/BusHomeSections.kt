@@ -256,7 +256,6 @@ internal sealed class BusTaskAreaRow {
     abstract val cardLast: Boolean
     abstract val listFirst: Boolean
     abstract val listLast: Boolean
-
     /** 一条任务；[dense] = 按项目视图的紧凑排布（行内边距收为 8、不显示 Agent 名） */
     data class Task(
         val task: BusHomeTask,
@@ -282,6 +281,31 @@ internal sealed class BusTaskAreaRow {
         override val listLast: Boolean = false,
     ) : BusTaskAreaRow() {
         override val key: String = "project-${group.key}-$expanded"
+    }
+}
+
+/**
+ * 行的身份和顺序是否没变（状态、时间、摘要这些内容变化不算）。
+ *
+ * `vforLazy` 只在条数变化时才会重新取列表，新增/移除/换行必须重建数据源；
+ * 只是内容变化仍然交给 `diffUpdate`，保住滚动位置。
+ */
+internal fun sameTaskAreaRowOrder(
+    current: List<BusTaskAreaRow>,
+    next: List<BusTaskAreaRow>,
+): Boolean {
+    if (current.size != next.size) return false
+    return next.indices.all { index ->
+        when (val row = current[index]) {
+            is BusTaskAreaRow.Task -> {
+                val other = next[index]
+                other is BusTaskAreaRow.Task && other.task.id == row.task.id
+            }
+            is BusTaskAreaRow.GroupHeader -> {
+                val other = next[index]
+                other is BusTaskAreaRow.GroupHeader && other.group.key == row.group.key
+            }
+        }
     }
 }
 
