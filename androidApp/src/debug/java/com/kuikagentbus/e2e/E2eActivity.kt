@@ -1,7 +1,11 @@
 package com.kuikagentbus.e2e
 
 import android.app.Activity
+import android.app.Notification
+import android.app.NotificationManager
 import android.os.Bundle
+import android.os.PowerManager
+import android.os.SystemClock
 import android.util.Log
 import com.kuikagentbus.protocol.BUS_UPLOAD_ID_BYTES
 import com.kuikagentbus.protocol.busBase64Url
@@ -20,6 +24,8 @@ import kotlin.concurrent.thread
  * transport APIs the UI uses and logs E2E_RESULT.
  */
 class E2eActivity : Activity() {
+    private var notifyMode = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (running) {
@@ -27,6 +33,7 @@ class E2eActivity : Activity() {
             return
         }
         running = true
+        notifyMode = intent?.getBooleanExtra("e2e_notify", false) == true
         val pairLink = intent?.getStringExtra("e2e_pair_b64")
             ?.let { runCatching { String(android.util.Base64.decode(it, android.util.Base64.NO_WRAP)) }.getOrNull() }
             ?: intent?.getStringExtra("e2e_pair").orEmpty()
@@ -78,6 +85,15 @@ class E2eActivity : Activity() {
             log("followUp completed")
 
             log("approval")
+            if (notifyMode) {
+                log("notify-wait-lock")
+                if (!waitFor(60_000) { !isInteractive() }) {
+                    finishWith("E2E_NOTIFY FAIL screen stayed interactive")
+                    return
+                }
+                log("notify-locked")
+            }
+            val approvalStartedAt = SystemClock.elapsedRealtime()
             val beforeApproval = taskIds(snapshot())
             command("""{"id":"e2e-permission-${UUID.randomUUID()}","kind":"startTask","startTask":{"source":"acp","connectorId":"fake","projectPath":"/tmp","prompt":"NEED_PERMISSION"}}""")
             val approvalTask = waitForTask(60_000, beforeApproval) ?: run {
@@ -88,6 +104,16 @@ class E2eActivity : Activity() {
             if (!waitForTaskStatus(60_000, approvalTaskId, "waitingApproval")) {
                 finishWith("E2E_RESULT FAIL approval task did not wait ($approvalTaskId)")
                 return
+            }
+            if (notifyMode) {
+                val elapsed = SystemClock.elapsedRealtime() - approvalStartedAt
+                val shown = waitFor((10_000 - elapsed).coerceAtLeast(0)) { hasApprovalNotification() }
+                val total = SystemClock.elapsedRealtime() - approvalStartedAt
+                if (!shown) {
+                    finishWith("E2E_NOTIFY FAIL no approval notification in ${total}ms")
+                    return
+                }
+                log("E2E_NOTIFY PASS approval notification in ${total}ms (status at ${elapsed}ms)")
             }
             val requestId = taskById(snapshot(), approvalTaskId)
                 ?.optJSONObject("pendingRequest")
@@ -173,6 +199,20 @@ class E2eActivity : Activity() {
 
     private fun waitForTaskStatus(timeoutMs: Long, taskId: String, status: String): Boolean =
         waitFor(timeoutMs) { taskById(snapshot(), taskId)?.optString("status") == status }
+
+    private fun isInteractive(): Boolean =
+        getSystemService(PowerManager::class.java).isInteractive
+
+    private fun hasApprovalNotification(): Boolean {
+        val manager = getSystemService(NotificationManager::class.java)
+        return manager.activeNotifications.any { posted ->
+            posted.packageName == packageName &&
+                posted.notification.extras
+                    .getCharSequence(Notification.EXTRA_TITLE)
+                    ?.toString()
+                    ?.contains("需要审批") == true
+        }
+    }
 
     private fun waitFor(timeoutMs: Long, predicate: () -> Boolean): Boolean {
         val deadline = System.currentTimeMillis() + timeoutMs
