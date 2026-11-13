@@ -7,6 +7,8 @@ import android.os.Bundle
 import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
+import com.kuikagentbus.data.session.DshRelayProfile
+import com.kuikagentbus.data.storage.createDshLocalStore
 import com.kuikagentbus.protocol.BUS_UPLOAD_ID_BYTES
 import com.kuikagentbus.protocol.busBase64Url
 import com.kuikagentbus.relay.AgentHostBus
@@ -14,6 +16,7 @@ import com.kuikagentbus.relay.ArtifactFetch
 import com.kuikagentbus.relay.ArtifactUpload
 import com.kuikagentbus.relay.DshRelayManager
 import org.json.JSONObject
+import java.io.File
 import java.security.SecureRandom
 import java.util.UUID
 import kotlin.concurrent.thread
@@ -51,6 +54,23 @@ class E2eActivity : Activity() {
             if (paired["ok"] != true) {
                 finishWith("E2E_RESULT FAIL pair: ${paired["message"]}")
                 return
+            }
+            // 正常配对由页面写入本机档案；E2E 直接调后端，补上这一步
+            runCatching {
+                val hostId = paired["hostId"]?.toString().orEmpty()
+                val hostName = paired["hostName"]?.toString().orEmpty().ifBlank { "电脑" }
+                val origin = paired["relayOrigin"]?.toString().orEmpty()
+                if (hostId.isNotBlank() && origin.isNotBlank()) {
+                    val databaseDir = File(filesDir.parentFile, "databases").absolutePath
+                    createDshLocalStore("$databaseDir/dsh.db", null).saveRelayProfile(
+                        DshRelayProfile(
+                            hostId = hostId,
+                            hostName = hostName,
+                            relayOrigin = origin,
+                            pairedAt = System.currentTimeMillis(),
+                        ),
+                    )
+                }
             }
             log("connecting")
             DshRelayManager.connect(applicationContext)

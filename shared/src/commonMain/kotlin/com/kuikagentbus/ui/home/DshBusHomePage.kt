@@ -332,7 +332,7 @@ internal class DshBusHomePage : BasePager() {
                 setTimeout(pagerId, 0) {
                     revokeGroupBusy = false
                     when (status) {
-                        200 -> showRevokeGroup = false
+                        200, 204 -> showRevokeGroup = false
                         409 -> revokeGroupError = "这台电脑还没有配对"
                         0 -> revokeGroupError = "电脑已断开，正在回到扫码页"
                         else -> revokeGroupError = "解散失败（$status）"
@@ -385,7 +385,7 @@ internal class DshBusHomePage : BasePager() {
                 setTimeout(pagerId, 0) {
                     removePhoneBusy = false
                     when (status) {
-                        200 -> {
+                        200, 204 -> {
                             showRemovePhone = false
                             loadSettingsPhones()
                         }
