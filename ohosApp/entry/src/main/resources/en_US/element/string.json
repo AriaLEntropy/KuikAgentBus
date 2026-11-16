@@ -1,0 +1,24 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "AgentBus mobile"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "description"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "AgentBus"
+    },
+    {
+      "name": "dsh_camera_reason",
+      "value": "Scan the computer QR code to pair Relay"
+    },
+    {
+      "name": "dsh_network_reason",
+      "value": "Pair with the computer over Wi-Fi"
+    }
+  ]
+}
