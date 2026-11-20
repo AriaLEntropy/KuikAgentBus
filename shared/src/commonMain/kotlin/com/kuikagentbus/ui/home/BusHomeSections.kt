@@ -1,5 +1,6 @@
 package com.kuikagentbus.ui.home
 
+import com.kuikagentbus.text.BusPlainText
 import com.tencent.kuikly.core.base.Border
 import com.tencent.kuikly.core.base.BorderStyle
 import com.tencent.kuikly.core.base.BoxShadow
@@ -109,6 +110,9 @@ internal object BusHomeSectionTokens {
     /** 未读点 8、行尾预留 12 */
     val unreadDotSize: Float get() = busHomePx(8f)
     val unreadTrailWidth: Float get() = busHomePx(12f)
+
+    /** 行内 Agent 异常的小警告图标 12 */
+    val agentWarningIcon: Float get() = busHomePx(12f)
 
     /** 省略号位 14/600 */
     val avatarEllipsisFont: Float get() = busHomePx(14f)
@@ -403,9 +407,9 @@ internal fun busTaskRowStatus(status: String, statusLabel: String): BusTaskRowSt
     else -> BusTaskRowStatus(statusLabel, BusHomeSectionColors.doneDot, BusHomeTokens.textTertiary, false)
 }
 
-/** 任务行的摘要：挂起请求优先，其次最后一条消息；空串表示这一截不渲染 */
+/** 任务行的摘要：挂起请求优先，其次最后一条消息；Markdown 压成一行纯文本 */
 internal fun busTaskRowSummaryText(task: BusHomeTask): String =
-    task.summary.ifBlank { task.lastMessage }
+    BusPlainText.preview(task.summary.ifBlank { task.lastMessage })
 
 /** 头像栈里的一格 */
 internal data class BusAvatarSlot(
@@ -676,6 +680,7 @@ internal fun ViewContainer<*, *>.BusHomeListControls(
     selectedKeys: Set<String>,
     approveCount: () -> Int,
     agentsEmptyLabel: () -> String,
+    agentAlert: () -> BusAgentAlert?,
     onSelectView: (String) -> Unit,
     onOpenAgentSheet: () -> Unit,
 ) {
@@ -728,7 +733,13 @@ internal fun ViewContainer<*, *>.BusHomeListControls(
                 }
             }
         } else {
-            BusHomeAvatarStack(agents = agents, selectedKeys = selectedKeys, onClick = onOpenAgentSheet)
+            BusHomeAvatarStack(
+                agents = agents,
+                selectedKeys = selectedKeys,
+                palette = palette,
+                agentAlert = agentAlert,
+                onClick = onOpenAgentSheet,
+            )
         }
     }
 }
@@ -807,6 +818,8 @@ private fun ViewContainer<*, *>.BusHomeSegmentItem(
 private fun ViewContainer<*, *>.BusHomeAvatarStack(
     agents: List<BusHomeAgent>,
     selectedKeys: Set<String>,
+    palette: BusHomePalette,
+    agentAlert: () -> BusAgentAlert?,
     onClick: () -> Unit,
 ) {
     View {
@@ -820,6 +833,27 @@ private fun ViewContainer<*, *>.BusHomeAvatarStack(
         event { click { onClick() } }
         busHomeAvatarSlots(agents, selectedKeys).forEach { slot ->
             BusHomeAvatarSlotView(slot)
+        }
+        // 只报故障：红 = error，琥珀 = degraded；正常/停用/未安装不打扰
+        vif({ agentAlert() != null }) {
+            View {
+                attr {
+                    positionType(FlexPositionType.ABSOLUTE)
+                    top(-1f)
+                    right(-1f)
+                    size(BusHomeSectionTokens.unreadDotSize, BusHomeSectionTokens.unreadDotSize)
+                    borderRadius(BusHomeSectionTokens.unreadDotSize / 2f)
+                    backgroundColor(
+                        if (agentAlert() == BusAgentAlert.ERROR) {
+                            palette.error
+                        } else {
+                            BusHomeSectionColors.waitingText
+                        },
+                    )
+                    border(Border(1.5f, BorderStyle.SOLID, BusHomeTokens.cardFill))
+                    accessibility("Agent 异常")
+                }
+            }
         }
     }
 }
@@ -888,6 +922,7 @@ internal fun ViewContainer<*, *>.BusHomeTaskList(
     onScrollY: (Float) -> Unit,
     onOpenTask: (BusHomeTask) -> Unit,
     unread: (BusHomeTask) -> Boolean,
+    agentError: (BusHomeTask) -> Boolean,
     onToggleGroup: (String, Boolean) -> Unit,
     onGroupMenu: (BusHomeProjectGroup) -> Unit,
 ) {
@@ -916,6 +951,7 @@ internal fun ViewContainer<*, *>.BusHomeTaskList(
                     palette = palette,
                     onOpenTask = onOpenTask,
                     unread = unread,
+                    agentError = agentError,
                     onToggleGroup = onToggleGroup,
                     onGroupMenu = onGroupMenu,
                 )
@@ -960,6 +996,7 @@ private fun ViewContainer<*, *>.BusTaskAreaRowView(
     palette: BusHomePalette,
     onOpenTask: (BusHomeTask) -> Unit,
     unread: (BusHomeTask) -> Boolean,
+    agentError: (BusHomeTask) -> Boolean,
     onToggleGroup: (String, Boolean) -> Unit,
     onGroupMenu: (BusHomeProjectGroup) -> Unit,
 ) {
@@ -1005,6 +1042,7 @@ private fun ViewContainer<*, *>.BusTaskAreaRowView(
                 dense = row.dense,
                 palette = palette,
                 unread = { unread(row.task) },
+                agentError = { agentError(row.task) },
                 onClick = { onOpenTask(row.task) },
             )
 
@@ -1050,6 +1088,7 @@ private fun ViewContainer<*, *>.BusTaskRowContent(
     dense: Boolean,
     palette: BusHomePalette,
     unread: () -> Boolean,
+    agentError: () -> Boolean,
     onClick: () -> Unit,
 ) {
     val status = busTaskRowStatus(task.status, task.statusLabel)
@@ -1142,11 +1181,24 @@ private fun ViewContainer<*, *>.BusTaskRowContent(
                                 marginRight(BusHomeSectionTokens.metaGap)
                             }
                         }
+                        // 只在这个任务所属 Agent 真正 error 时标一个小警告；停用/未安装不打扰
+                        vif({ agentError() }) {
+                            Image {
+                                attr {
+                                    src(ImageUri.commonAssets("warning-outline.svg"))
+                                    size(BusHomeSectionTokens.agentWarningIcon, BusHomeSectionTokens.agentWarningIcon)
+                                    tintColor(palette.error)
+                                    marginRight(BusHomeSectionTokens.metaGap)
+                                    accessibility("Agent 启动失败")
+                                }
+                            }
+                        }
                     }
                     if (summary.isNotBlank()) {
                         Text {
                             attr {
-                                text("· $summary")
+                                // 项目视图的 dense 行不显示 Agent；状态又被隐藏时，摘要前面不该留一个孤零零的「·」
+                                text(if (busTaskShowsStatus(task.status) || !dense) "· $summary" else summary)
                                 fontSize(BusHomeTokens.fontSizeMeta)
                                 lineHeight(BusHomeSectionTokens.captionLineHeight)
                                 color(BusHomeTokens.textTertiary)

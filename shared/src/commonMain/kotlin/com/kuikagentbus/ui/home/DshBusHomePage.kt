@@ -19,6 +19,7 @@ import com.kuikagentbus.protocol.DshLocalBusSnapshotCache
 import com.kuikagentbus.protocol.busConnectorTarget
 import com.kuikagentbus.protocol.busCanRestartConnector
 import com.kuikagentbus.protocol.busParse
+import com.kuikagentbus.text.BusPlainText
 import com.kuikagentbus.data.connection.DshRelayModule
 import com.kuikagentbus.data.connection.DshRelayPhase
 import com.kuikagentbus.data.connection.supportsRelayBridge
@@ -84,6 +85,9 @@ internal class DshBusHomePage : BasePager() {
 
     /** Agent 多选筛选：空集合 = 不过滤（等价「全部 Agent」，也是面板首次打开的全选态） */
     private var selectedAgentKeys by observable(emptySet<String>())
+    /** Agent 故障角标/任务行警告的响应式版本；agents 本身不是 observable */
+    private var agentStatusKey = ""
+    private var agentStatusRevision by observable(0)
     private var showAgentSheet by observable(false)
     private var agentExpandedKey by observable("")
     private var agentBusyKey by observable("")
@@ -244,6 +248,25 @@ internal class DshBusHomePage : BasePager() {
     private fun approvalBindKey(): String =
         approvalItemsNow().joinToString("|") { it.key } + "#" + approvalFilter
 
+    private fun agentAlertNow(): BusAgentAlert? {
+        agentStatusRevision
+        return busHomeAgentAlert(homeView.agents)
+    }
+
+    private fun taskAgentError(task: BusHomeTask): Boolean {
+        agentStatusRevision
+        return busTaskAgentHasError(task, homeView.agents)
+    }
+
+    private fun syncAgentStatusRevision(agents: List<BusHomeAgent>) {
+        val key = agents.joinToString("|") {
+            "${it.key}:${it.available}:${it.enabled}:${it.status}"
+        }
+        if (key == agentStatusKey) return
+        agentStatusKey = key
+        agentStatusRevision++
+    }
+
     private fun agentSheetBindKey(): String =
         homeView.agents.joinToString("|") { "${it.key}:${it.status}:${it.taskCount}:${it.lastError}:${it.available}:${it.enabled}" } +
             "#" + (homeView.device?.canRestartConnectors == true)
@@ -253,6 +276,20 @@ internal class DshBusHomePage : BasePager() {
     private fun openAgentSheet() {
         agentErrorKey = ""
         showAgentSheet = true
+        probeAgents()
+    }
+
+    /** 打开 Agent 选择/管理面板时让 host 做一次只读探测；不启动新进程。 */
+    private fun probeAgents() {
+        val device = homeView.device ?: return
+        val json = BusCommands.probeAgents(
+            BusCommands.newCommandId(),
+            BusCommands.createdAt(),
+            device.agentId,
+        )
+        runCatching {
+            acquireModule<DshRelayModule>(DshRelayModule.MODULE_NAME).busCommand(json) { }
+        }
     }
 
     private fun closeAgentSheet() {
@@ -896,6 +933,7 @@ internal class DshBusHomePage : BasePager() {
         newTaskKeyboardHeight = 0f
         showNewTaskModels = false
         showNewTaskSheet = true
+        probeAgents()
     }
 
     private fun submitNewTask() {
@@ -1259,6 +1297,7 @@ internal class DshBusHomePage : BasePager() {
         super.pageDidAppear()
         // 从会话页返回时重新读一次标记，保证行尾点和服务端最新的 updatedAt 对齐
         refreshUnreadMarkers()
+        if (showAgentSheet || showNewTaskSheet) probeAgents()
     }
 
     override fun created() {
@@ -1426,6 +1465,7 @@ internal class DshBusHomePage : BasePager() {
         pruneApprovalState()
         initProjectCollapseIfNeeded()
         ensureUnreadBaseline(next)
+        syncAgentStatusRevision(next.agents)
         syncTaskRows()
         openPendingTaskIfNeeded()
     }
@@ -1497,8 +1537,8 @@ internal class DshBusHomePage : BasePager() {
                 val notify = runCatching { JSONObject(raw) }.getOrNull()
                 if (notify != null) {
                     busBannerAgent = notify.optString("agentName")
-                    busBannerTitle = notify.optString("title")
-                    busBannerBody = notify.optString("body")
+                    busBannerTitle = BusPlainText.preview(notify.optString("title"), 80)
+                    busBannerBody = BusPlainText.preview(notify.optString("body"), 60)
                     busBannerVisible = true
                     setTimeout(pagerId, 3_000) {
                         if (alive) busBannerVisible = false
@@ -1611,6 +1651,7 @@ internal class DshBusHomePage : BasePager() {
                             selectedKeys = this@DshBusHomePage.selectedAgentKeys,
                             approveCount = { this@DshBusHomePage.openApprovalCount() },
                             agentsEmptyLabel = { this@DshBusHomePage.agentEntryLabel() },
+                            agentAlert = { this@DshBusHomePage.agentAlertNow() },
                             onSelectView = { this@DshBusHomePage.selectListViewMode(it) },
                             onOpenAgentSheet = { this@DshBusHomePage.openAgentSheet() },
                         )
@@ -1636,6 +1677,7 @@ internal class DshBusHomePage : BasePager() {
                                 },
                                 onOpenTask = { this@DshBusHomePage.openBusChat(it) },
                                 unread = { this@DshBusHomePage.isTaskUnread(it) },
+                                agentError = { this@DshBusHomePage.taskAgentError(it) },
                                 onToggleGroup = { key, expanded ->
                                     this@DshBusHomePage.setProjectExpanded(key, expanded)
                                 },

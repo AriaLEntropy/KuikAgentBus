@@ -97,6 +97,22 @@ internal fun busAgentCanStartTask(
     declared: Boolean,
 ): Boolean = available && enabled && declared
 
+/** 首页 Agent 栈只提醒故障；已停用/未安装是用户配置，不算异常。 */
+internal enum class BusAgentAlert { ERROR, DEGRADED }
+
+internal fun busHomeAgentAlert(agents: List<BusHomeAgent>): BusAgentAlert? {
+    val usable = agents.filter { it.enabled && it.available }
+    if (usable.any { it.status == "error" }) return BusAgentAlert.ERROR
+    if (usable.any { it.status == "degraded" }) return BusAgentAlert.DEGRADED
+    return null
+}
+
+/** 任务行只在它所属 Agent 确实 error 时打标记；降级不打扰任务列表。 */
+internal fun busTaskAgentHasError(task: BusHomeTask, agents: List<BusHomeAgent>): Boolean =
+    agents.any {
+        it.key == task.agentKey && it.enabled && it.available && it.status == "error"
+    }
+
 internal data class BusHomeDevice(
     val agentId: String,
     val name: String,
@@ -594,8 +610,9 @@ internal fun taskStatusLabel(status: String): String = when (status) {
 internal fun busTaskIsUnread(task: BusHomeTask, seenUpdatedAt: String?): Boolean =
     task.updatedAt.isNotBlank() && seenUpdatedAt != task.updatedAt
 
-/** completed 不在列表行显示状态点与文案；其余状态照常。 */
-internal fun busTaskShowsStatus(status: String): Boolean = status != "completed"
+/** completed / idle 是默认态，不在列表行显示状态点与文案；其余状态照常。 */
+internal fun busTaskShowsStatus(status: String): Boolean =
+    status != "completed" && status != "idle"
 
 internal fun platformAsset(platform: String): String = when (platform.lowercase()) {
     "macos", "mac", "darwin" -> "platform-apple.svg"

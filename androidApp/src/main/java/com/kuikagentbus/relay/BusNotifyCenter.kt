@@ -9,6 +9,7 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import com.kuikagentbus.KuiklyRenderActivity
 import com.kuikagentbus.R
+import com.kuikagentbus.text.BusPlainText
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
@@ -39,8 +40,8 @@ internal object BusNotifyCenter {
         val pending = PendingIntent.getActivity(context, taskId.hashCode(), intent, flags)
         val notification = NotificationCompat.Builder(context, channel.id)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle(payload.string("title").orEmpty().ifBlank { "任务有更新" })
-            .setContentText(payload.string("body").orEmpty())
+            .setContentTitle(BusPlainText.preview(payload.string("title").orEmpty(), 80).ifBlank { "任务有更新" })
+            .setContentText(BusPlainText.preview(payload.string("body").orEmpty(), 60))
             .setSubText(payload.string("agentName").orEmpty())
             .setContentIntent(pending)
             .setAutoCancel(true)

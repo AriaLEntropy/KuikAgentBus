@@ -190,11 +190,14 @@ class BusHomeSectionsTest {
     }
 
     @Test
-    fun completedHidesStatusButOthersKeepIt() {
+    fun defaultStatesHideStatusButActiveOnesKeepIt() {
         assertFalse(busTaskShowsStatus("completed"))
+        assertFalse(busTaskShowsStatus("idle"))
         assertTrue(busTaskShowsStatus("running"))
         assertTrue(busTaskShowsStatus("waitingApproval"))
-        assertTrue(busTaskShowsStatus("idle"))
+        assertTrue(busTaskShowsStatus("waitingInput"))
+        assertTrue(busTaskShowsStatus("failed"))
+        assertTrue(busTaskShowsStatus("interrupted"))
     }
 
     @Test
@@ -218,8 +221,52 @@ class BusHomeSectionsTest {
     }
 
     @Test
+    fun rowSummaryFlattensMarkdown() {
+        assertEquals(
+            "标题 正文",
+            busTaskRowSummaryText(task("x", "completed", false, summary = "", lastMessage = "## 标题\n\n**正文**")),
+        )
+        assertEquals(
+            "[代码]",
+            busTaskRowSummaryText(task("x", "completed", false, summary = "", lastMessage = "```js\nconsole.log(1)\n```")),
+        )
+    }
+
+    @Test
     fun agentIconsStayOnAgentSurfaces() {
         assertEquals(BusAgentVisuals.CLAUDE, busAgentAsset("acp", "claude-code"))
+    }
+
+    @Test
+    fun agentAlertOnlyCoversEnabledAvailableFailures() {
+        val error = listOf(agent("codex", "codex").copy(status = "error"))
+        assertEquals(BusAgentAlert.ERROR, busHomeAgentAlert(error))
+        val degraded = listOf(agent("codex", "codex").copy(status = "degraded"))
+        assertEquals(BusAgentAlert.DEGRADED, busHomeAgentAlert(degraded))
+        assertEquals(null, busHomeAgentAlert(listOf(agent("codex", "codex"))))
+        // 停用 / 未安装不算故障
+        assertEquals(
+            null,
+            busHomeAgentAlert(listOf(agent("codex", "codex").copy(status = "error", enabled = false))),
+        )
+        assertEquals(
+            null,
+            busHomeAgentAlert(listOf(agent("codex", "codex").copy(status = "error", available = false))),
+        )
+    }
+
+    @Test
+    fun taskRowWarnsOnlyWhenItsAgentHasError() {
+        val task = task("x", "completed", false)
+        assertEquals(true, busTaskAgentHasError(task, listOf(agent("codex", "codex").copy(status = "error"))))
+        assertEquals(false, busTaskAgentHasError(task, listOf(agent("codex", "codex").copy(status = "degraded"))))
+        assertEquals(
+            false,
+            busTaskAgentHasError(
+                task,
+                listOf(agent("codex", "codex").copy(status = "error", enabled = false)),
+            ),
+        )
     }
 
     // ---------- 头像栈 ----------

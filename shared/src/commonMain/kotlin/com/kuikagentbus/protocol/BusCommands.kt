@@ -109,6 +109,18 @@ object BusCommands {
     }.toString()
 
     /**
+     * 只读探测：手机打开 Agent 选择/管理面板时让电脑重新检查一遍可执行文件和已知进程。
+     * 不启动任何新进程；host 会合并几秒内的重复请求并推新快照。
+     */
+    fun probeAgents(commandId: String, createdAt: String, agentId: String): String = buildJsonObject {
+        put("id", JsonPrimitive(commandId))
+        put("createdAt", JsonPrimitive(createdAt))
+        put("agentId", JsonPrimitive(agentId))
+        put("kind", JsonPrimitive("probeAgents"))
+        put("probeAgents", buildJsonObject {})
+    }.toString()
+
+    /**
      * 协议 2.x 起：开关一个 Agent 的启用状态（手机上的「停止」「启动」）。
      * `connector = acp` 时必须带 `connectorId`，其余 kind 必须省略。
      */

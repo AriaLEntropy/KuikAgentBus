@@ -72,6 +72,19 @@ class BusApprovalCommandsTest {
     }
 
     @Test
+    fun probeAgentsCommandShape() {
+        val expected = """
+            {"id":"probe-1","createdAt":"2026-11-20T10:00:00Z","agentId":"hV3nQ7pLxK2mR8sTfW4bZQ","kind":"probeAgents","probeAgents":{}}
+        """.trimIndent()
+        val built = BusCommands.probeAgents(
+            commandId = "probe-1",
+            createdAt = "2026-11-20T10:00:00Z",
+            agentId = "hV3nQ7pLxK2mR8sTfW4bZQ",
+        )
+        assertEquals(busParse(expected).jsonObject, busParse(built).jsonObject)
+    }
+
+    @Test
     fun setConnectorEnabledMatchesThePlainFixtures() {
         val codex = """
             {"id":"5e4d3c2b-1a09-4f8e-8d7c-6b5a49382716","createdAt":"2026-09-17T08:25:00Z","agentId":"hV3nQ7pLxK2mR8sTfW4bZQ","kind":"setConnectorEnabled","setConnectorEnabled":{"connector":"codex","enabled":false}}
