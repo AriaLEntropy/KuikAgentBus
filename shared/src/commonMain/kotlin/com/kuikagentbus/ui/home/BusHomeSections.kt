@@ -146,9 +146,6 @@ internal object BusHomeSectionTokens {
     val titleLineHeight: Float get() = busHomePx(21f)
     val captionLineHeight: Float get() = busHomePx(17f)
 
-    /** 行内线性类图标的可见尺寸（36 底盘内约 6 内缩） */
-    val rowIconLineSize: Float get() = busHomePx(24f)
-
     /** 分组头：高 28、标题 14/600、箭头 16 */
     val groupHeadHeight: Float get() = busHomePx(28f)
     val groupHeadFont: Float get() = busHomePx(14f)
@@ -409,10 +406,6 @@ internal fun busTaskRowStatus(status: String, statusLabel: String): BusTaskRowSt
 /** 任务行的摘要：挂起请求优先，其次最后一条消息；空串表示这一截不渲染 */
 internal fun busTaskRowSummaryText(task: BusHomeTask): String =
     task.summary.ifBlank { task.lastMessage }
-
-/** 任务行的 Agent 图标（一律官方图标，未知连接器回退占位图） */
-internal fun busTaskRowAsset(task: BusHomeTask): String =
-    busAgentAsset(task.source, task.connectorId, task.agentKey, task.agent)
 
 /** 头像栈里的一格 */
 internal data class BusAvatarSlot(
@@ -1050,7 +1043,7 @@ internal fun busTaskAreaCardBottomGap(row: BusTaskAreaRow): Float = when {
     else -> 0f
 }
 
-/** 任务行内容：Agent 图标 36 圆 + 标题/时间 + 状态点与摘要 */
+/** 任务行内容：标题/时间 + 状态点与摘要；Agent 由副行文字表达，不再重复头像 */
 private fun ViewContainer<*, *>.BusTaskRowContent(
     task: BusHomeTask,
     rowWidth: Float,
@@ -1065,7 +1058,6 @@ private fun ViewContainer<*, *>.BusTaskRowContent(
     } else {
         BusHomeSectionTokens.rowPaddingVertical
     }
-    val asset = busTaskRowAsset(task)
     View {
         attr {
             width(rowWidth)
@@ -1077,34 +1069,8 @@ private fun ViewContainer<*, *>.BusTaskRowContent(
         event { click { onClick() } }
         View {
             attr {
-                size(BusSheetTokens.rowIconSize, BusSheetTokens.rowIconSize)
-                borderRadius(BusSheetTokens.rowIconSize / 2f)
-                backgroundColor(BusHomeTokens.field)
-                overflow(true)
-                alignItemsCenter()
-                justifyContentCenter()
-            }
-            Image {
-                attr {
-                    src(ImageUri.commonAssets(asset))
-                    // 同头像栈：照片类铺满 36 圆，圆角靠 overflow 裁，图片自身再兜一层
-                    borderRadius(BusSheetTokens.rowIconSize / 2f)
-                    overflow(true)
-                    if (busAgentIconIsPhoto(asset)) {
-                        size(BusSheetTokens.rowIconSize, BusSheetTokens.rowIconSize)
-                        resizeCover()
-                    } else {
-                        size(BusHomeSectionTokens.rowIconLineSize, BusHomeSectionTokens.rowIconLineSize)
-                        resizeContain()
-                    }
-                }
-            }
-        }
-        View {
-            attr {
                 flex(1f)
                 flexDirectionColumn()
-                marginLeft(BusHomeTokens.gapRow)
             }
             View {
                 attr {
@@ -1193,15 +1159,15 @@ private fun ViewContainer<*, *>.BusTaskRowContent(
                 }
             }
         }
-        // 未读点固定在行内容最右侧，垂直居中；没有未读时也保留同样宽度，避免行内文字左右跳
-        View {
-            attr {
-                width(BusHomeSectionTokens.unreadTrailWidth)
-                alignSelfCenter()
-                alignItemsFlexEnd()
-                justifyContentCenter()
-            }
-            vif({ unread() }) {
+        // 只有未读时才占行尾 12：已读行左右留白一致，不留下一条空槽
+        vif({ unread() }) {
+            View {
+                attr {
+                    width(BusHomeSectionTokens.unreadTrailWidth)
+                    alignSelfCenter()
+                    alignItemsFlexEnd()
+                    justifyContentCenter()
+                }
                 View {
                     attr {
                         size(BusHomeSectionTokens.unreadDotSize, BusHomeSectionTokens.unreadDotSize)

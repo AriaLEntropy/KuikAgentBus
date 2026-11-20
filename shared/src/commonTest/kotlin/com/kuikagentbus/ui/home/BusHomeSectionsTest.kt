@@ -218,18 +218,8 @@ class BusHomeSectionsTest {
     }
 
     @Test
-    fun rowAssetUsesOfficialAgentIcons() {
+    fun agentIconsStayOnAgentSurfaces() {
         assertEquals(BusAgentVisuals.CLAUDE, busAgentAsset("acp", "claude-code"))
-        // source 缺失品牌信息时，用 agentKey / 名字兜底到专属头像
-        assertEquals(BusAgentVisuals.CODEX, busTaskRowAsset(task("x", "completed", false).copy(source = "mystery")))
-        // 通用 ACP 即使名字叫 Codex，也保持中性头像
-        assertEquals(
-            BusAgentVisuals.FALLBACK,
-            busTaskRowAsset(
-                task("x", "completed", false)
-                    .copy(source = "acp", connectorId = "some-manifest-id"),
-            ),
-        )
     }
 
     // ---------- 头像栈 ----------
