@@ -145,6 +145,23 @@ class BusHomeApprovalModelTest {
     }
 
     @Test
+    fun lastSelectedAgentCheckboxIsLocked() {
+        val all = setOf("acp:claude-code", "codex", "dsh")
+        // 只剩一个有效选中项：该项锁定
+        assertTrue(busAgentToggleLocked(setOf("codex"), "codex", all))
+        // 空集合 = 全选，三项都在，不锁
+        assertFalse(busAgentToggleLocked(emptySet(), "codex", all))
+        // 两项已选，都还能取消
+        assertFalse(busAgentToggleLocked(setOf("codex", "dsh"), "codex", all))
+        // 只有一项可选且已选：锁
+        assertTrue(busAgentToggleLocked(emptySet(), "codex", setOf("codex")))
+        // 未选中的行是「可加入」，不是锁定
+        assertFalse(busAgentToggleLocked(setOf("codex"), "dsh", all))
+        // 不可勾选的 key 不参与
+        assertFalse(busAgentToggleLocked(setOf("codex"), "dsh", setOf("codex")))
+    }
+
+    @Test
     fun toggleAgentFilterAddsRemovesAndKeepsAtLeastOne() {
         val all = setOf("acp:claude-code", "codex", "dsh", "acp:opencode")
         // 空集合 = 全选：点一行等于取消这一行

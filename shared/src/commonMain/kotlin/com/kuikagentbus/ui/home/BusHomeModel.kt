@@ -362,6 +362,26 @@ internal fun busAgentSelectionForDisplay(selected: Set<String>, selectableKeys: 
 internal fun busAgentSelectionIsAll(selected: Set<String>, selectableKeys: Set<String>): Boolean =
     selected.isEmpty() || selectableKeys.all { it in selected }
 
+/** 多选面板的有效选中集合：空集合按全选展开，并滤掉不可勾选的 key。 */
+internal fun busAgentEffectiveSelected(selected: Set<String>, selectableKeys: Set<String>): Set<String> =
+    if (selected.isEmpty()) selectableKeys else selected.filterTo(mutableSetOf()) { it in selectableKeys }
+
+/**
+ * 最后一项的勾选框是否应锁定。
+ *
+ * 至少保留一个可勾选的 Agent，所以「已选且有效选中集合只剩它一个」时不能再取消；
+ * 面板据此把最后一项的勾选框置灰，避免点了没反应的静默失败。
+ */
+internal fun busAgentToggleLocked(
+    selected: Set<String>,
+    agentKey: String,
+    selectableKeys: Set<String>,
+): Boolean {
+    if (agentKey !in selectableKeys) return false
+    val current = busAgentEffectiveSelected(selected, selectableKeys)
+    return agentKey in current && current.size <= 1
+}
+
 /**
  * 多选面板点一下：已选则取消，未选则加入。
  *
@@ -376,16 +396,12 @@ internal fun busToggleAgentFilter(
     selectableKeys: Set<String>,
 ): Set<String> {
     if (agentKey.isEmpty() || agentKey !in selectableKeys) return selected
-    val current = if (selected.isEmpty()) {
-        selectableKeys
-    } else {
-        selected.filterTo(mutableSetOf()) { it in selectableKeys }
-    }
+    val current = busAgentEffectiveSelected(selected, selectableKeys)
     if (agentKey !in current) {
         val next = current + agentKey
         return if (next.containsAll(selectableKeys)) emptySet() else next
     }
-    if (current.size <= 1) return selected
+    if (busAgentToggleLocked(selected, agentKey, selectableKeys)) return selected
     return current - agentKey
 }
 
@@ -568,6 +584,18 @@ internal fun taskStatusLabel(status: String): String = when (status) {
     "idle" -> "空闲"
     else -> "未知"
 }
+
+/**
+ * 任务是否未读：本机记录的上次打开 updatedAt 与当前不同。
+ *
+ * 没有记录 = 基线之后新出现的任务，视为未读；首次同步的存量任务已在基线
+ * 写入当时的 updatedAt，不会一上来满屏红点。updatedAt 为空的任务不标未读。
+ */
+internal fun busTaskIsUnread(task: BusHomeTask, seenUpdatedAt: String?): Boolean =
+    task.updatedAt.isNotBlank() && seenUpdatedAt != task.updatedAt
+
+/** completed 不在列表行显示状态点与文案；其余状态照常。 */
+internal fun busTaskShowsStatus(status: String): Boolean = status != "completed"
 
 internal fun platformAsset(platform: String): String = when (platform.lowercase()) {
     "macos", "mac", "darwin" -> "platform-apple.svg"

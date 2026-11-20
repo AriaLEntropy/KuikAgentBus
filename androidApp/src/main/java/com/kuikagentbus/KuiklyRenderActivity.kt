@@ -203,6 +203,10 @@ class KuiklyRenderActivity : AppCompatActivity(), KuiklyRenderViewBaseDelegatorD
         val param = argsToMap()
         param["appId"] = 1
         param["embeddedEngine"] = false
+        // 通知点击只带 taskId；先落到首页，等快照到了再由首页打开会话并写已读标记
+        intent.getStringExtra("bus_notify_task_id")?.takeIf { it.isNotBlank() }?.let {
+            param["openTaskId"] = it
+        }
         param["databaseDir"] = java.io.File(KRApplication.application.filesDir.parentFile, "databases").apply {
             if (!exists()) mkdirs()
         }.absolutePath

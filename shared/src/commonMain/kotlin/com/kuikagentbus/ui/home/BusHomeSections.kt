@@ -106,9 +106,9 @@ internal object BusHomeSectionTokens {
     /** 头像栈左右留白 8（叠放的首格靠它顶出来） */
     val avatarStackPaddingLeft: Float get() = busHomePx(8f)
 
-    /** 头像投影 0 1 3 */
-    val avatarShadowY: Float get() = busHomePx(1f)
-    val avatarShadowBlur: Float get() = busHomePx(3f)
+    /** 未读点 8、行尾预留 12 */
+    val unreadDotSize: Float get() = busHomePx(8f)
+    val unreadTrailWidth: Float get() = busHomePx(12f)
 
     /** 省略号位 14/600 */
     val avatarEllipsisFont: Float get() = busHomePx(14f)
@@ -210,8 +210,12 @@ internal object BusHomeSectionColors {
     /** 入口主投影 rgba(40,40,55,.08) */
     val entryShadow = Color(0x14282837)
 
-    /** 胶囊底 rgba(255,255,255,.72) */
-    val capsuleFill = Color(0xB8FFFFFF)
+    /**
+     * 胶囊底：设计稿是 rgba(255,255,255,.72) + backdrop blur。
+     * Kuikly 没有实时模糊，半透明白底会把下面滚动的列表文字透出来，
+     * 胶囊看着像脏了一层；这里改用实底，和右侧 FAB 保持同一材质。
+     */
+    val capsuleFill = Color(0xFFFFFFFF)
 
     /** 胶囊描边 rgba(255,255,255,.75) */
     val capsuleBorder = Color(0xBFFFFFFF)
@@ -230,9 +234,6 @@ internal object BusHomeSectionColors {
 
     /** 已完成 / 其余状态的状态点 #C9C4BC */
     val doneDot = Color(0xFFC9C4BC)
-
-    /** 空头像位底 #F0F0F2（§16.1 line/border） */
-    val avatarEmpty = Color(0xFFF0F0F2)
 
     /** 组间发丝线 #F0F0F3（§16.1 line/hairline） */
     val hairline = Color(0xFFF0F0F3)
@@ -419,8 +420,6 @@ internal data class BusAvatarSlot(
     val isPhoto: Boolean,
     /** 固定的省略号位（最后一格） */
     val ellipsis: Boolean,
-    /** false = Agent 不足 3 个时留出的空位 */
-    val filled: Boolean,
 )
 
 /** 省略号位之外可放的头像格数（§16.6：前 3 位显示已选 Agent） */
@@ -428,21 +427,16 @@ internal const val BUS_AVATAR_AGENT_SLOTS = 3
 
 /**
  * 头像栈的格子：已选 Agent 优先；没勾选等价于「全部」，取电脑上的前几个，
- * 不足补空位，最后一格固定是省略号
+ * 最后固定一格省略号。不足 3 个不补空位，避免留下灰色空洞。
  */
 internal fun busHomeAvatarSlots(agents: List<BusHomeAgent>, selectedKeys: Set<String>): List<BusAvatarSlot> {
     val shown = if (selectedKeys.isEmpty()) agents else agents.filter { it.key in selectedKeys }
-    val slots = ArrayList<BusAvatarSlot>(BUS_AVATAR_AGENT_SLOTS + 1)
-    for (index in 0 until BUS_AVATAR_AGENT_SLOTS) {
-        val agent = shown.getOrNull(index)
-        if (agent == null) {
-            slots += BusAvatarSlot(asset = "", isPhoto = false, ellipsis = false, filled = false)
-        } else {
-            val asset = BusAgentVisuals.assetFor(agent.source, agent.connectorId, agent.key, agent.name)
-            slots += BusAvatarSlot(asset = asset, isPhoto = busAgentIconIsPhoto(asset), ellipsis = false, filled = true)
-        }
+    val slots = ArrayList<BusAvatarSlot>(minOf(shown.size, BUS_AVATAR_AGENT_SLOTS) + 1)
+    shown.take(BUS_AVATAR_AGENT_SLOTS).forEach { agent ->
+        val asset = BusAgentVisuals.assetFor(agent.source, agent.connectorId, agent.key, agent.name)
+        slots += BusAvatarSlot(asset = asset, isPhoto = busAgentIconIsPhoto(asset), ellipsis = false)
     }
-    slots += BusAvatarSlot(asset = "", isPhoto = false, ellipsis = true, filled = true)
+    slots += BusAvatarSlot(asset = "", isPhoto = false, ellipsis = true)
     return slots
 }
 
@@ -845,18 +839,8 @@ private fun ViewContainer<*, *>.BusHomeAvatarSlotView(slot: BusAvatarSlot) {
             // 每格都左移叠放，第一格靠栈容器的 padding-left 顶回原位
             marginLeft(-BusHomeTokens.avatarOverlap)
             overflow(true)
-            backgroundColor(
-                if (slot.filled) BusHomeTokens.cardFill else BusHomeSectionColors.avatarEmpty,
-            )
+            backgroundColor(BusHomeTokens.cardFill)
             border(Border(BusHomeTokens.avatarBorder, BorderStyle.SOLID, BusHomeTokens.cardFill))
-            boxShadow(
-                BoxShadow(
-                    0f,
-                    BusHomeSectionTokens.avatarShadowY,
-                    BusHomeSectionTokens.avatarShadowBlur,
-                    BusHomeTokens.avatarShadow,
-                ),
-            )
             alignItemsCenter()
             justifyContentCenter()
         }
@@ -870,7 +854,7 @@ private fun ViewContainer<*, *>.BusHomeAvatarSlotView(slot: BusAvatarSlot) {
                     textAlignCenter()
                 }
             }
-        } else if (slot.filled) {
+        } else {
             Image {
                 attr {
                     src(ImageUri.commonAssets(slot.asset))
@@ -910,6 +894,7 @@ internal fun ViewContainer<*, *>.BusHomeTaskList(
     preloadHeight: Float,
     onScrollY: (Float) -> Unit,
     onOpenTask: (BusHomeTask) -> Unit,
+    unread: (BusHomeTask) -> Boolean,
     onToggleGroup: (String, Boolean) -> Unit,
     onGroupMenu: (BusHomeProjectGroup) -> Unit,
 ) {
@@ -937,6 +922,7 @@ internal fun ViewContainer<*, *>.BusHomeTaskList(
                     rowWidth = rowWidth,
                     palette = palette,
                     onOpenTask = onOpenTask,
+                    unread = unread,
                     onToggleGroup = onToggleGroup,
                     onGroupMenu = onGroupMenu,
                 )
@@ -980,6 +966,7 @@ private fun ViewContainer<*, *>.BusTaskAreaRowView(
     rowWidth: Float,
     palette: BusHomePalette,
     onOpenTask: (BusHomeTask) -> Unit,
+    unread: (BusHomeTask) -> Boolean,
     onToggleGroup: (String, Boolean) -> Unit,
     onGroupMenu: (BusHomeProjectGroup) -> Unit,
 ) {
@@ -1024,6 +1011,7 @@ private fun ViewContainer<*, *>.BusTaskAreaRowView(
                 rowWidth = rowWidth,
                 dense = row.dense,
                 palette = palette,
+                unread = { unread(row.task) },
                 onClick = { onOpenTask(row.task) },
             )
 
@@ -1068,6 +1056,7 @@ private fun ViewContainer<*, *>.BusTaskRowContent(
     rowWidth: Float,
     dense: Boolean,
     palette: BusHomePalette,
+    unread: () -> Boolean,
     onClick: () -> Unit,
 ) {
     val status = busTaskRowStatus(task.status, task.statusLabel)
@@ -1144,55 +1133,81 @@ private fun ViewContainer<*, *>.BusTaskRowContent(
                     }
                 }
             }
-            View {
-                attr {
-                    flexDirectionRow()
-                    alignItemsCenter()
-                    marginTop(if (dense) BusHomeSectionTokens.metaRowTopDense else BusHomeSectionTokens.metaRowTop)
-                }
+            val summary = busTaskRowSummaryText(task)
+            // 项目视图的 dense 行不显示 Agent；completed 又去掉了状态，摘要为空时整行 meta 没有内容
+            val showMeta = busTaskShowsStatus(task.status) || !dense || summary.isNotBlank()
+            if (showMeta) {
                 View {
                     attr {
-                        size(BusHomeSectionTokens.onlineDot, BusHomeSectionTokens.onlineDot)
-                        borderRadius(BusHomeSectionTokens.onlineDot / 2f)
-                        backgroundColor(status.dot)
-                        marginRight(BusHomeSectionTokens.metaGap)
+                        flexDirectionRow()
+                        alignItemsCenter()
+                        marginTop(if (dense) BusHomeSectionTokens.metaRowTopDense else BusHomeSectionTokens.metaRowTop)
+                    }
+                    // completed 不再在列表行标状态：去掉灰点和“已完成”，让 meta 直接从 Agent 开始
+                    if (busTaskShowsStatus(task.status)) {
+                        View {
+                            attr {
+                                size(BusHomeSectionTokens.onlineDot, BusHomeSectionTokens.onlineDot)
+                                borderRadius(BusHomeSectionTokens.onlineDot / 2f)
+                                backgroundColor(status.dot)
+                                marginRight(BusHomeSectionTokens.metaGap)
+                            }
+                        }
+                        Text {
+                            attr {
+                                text(status.label)
+                                fontSize(BusHomeTokens.fontSizeCaption)
+                                lineHeight(BusHomeSectionTokens.captionLineHeight)
+                                if (status.emphasized) fontWeightBold() else fontWeightMedium()
+                                color(status.text)
+                                marginRight(BusHomeSectionTokens.metaGap)
+                            }
+                        }
+                    }
+                    if (!dense) {
+                        Text {
+                            attr {
+                                text(task.agent)
+                                fontSize(BusHomeTokens.fontSizeMeta)
+                                fontWeightMedium()
+                                color(BusHomeTokens.textSecondary)
+                                lines(1)
+                                textOverFlowTail()
+                                marginRight(BusHomeSectionTokens.metaGap)
+                            }
+                        }
+                    }
+                    if (summary.isNotBlank()) {
+                        Text {
+                            attr {
+                                text("· $summary")
+                                fontSize(BusHomeTokens.fontSizeMeta)
+                                lineHeight(BusHomeSectionTokens.captionLineHeight)
+                                color(BusHomeTokens.textTertiary)
+                                flex(1f)
+                                lines(1)
+                                textOverFlowTail()
+                            }
+                        }
                     }
                 }
-                Text {
+            }
+        }
+        // 未读点固定在行内容最右侧，垂直居中；没有未读时也保留同样宽度，避免行内文字左右跳
+        View {
+            attr {
+                width(BusHomeSectionTokens.unreadTrailWidth)
+                alignSelfCenter()
+                alignItemsFlexEnd()
+                justifyContentCenter()
+            }
+            vif({ unread() }) {
+                View {
                     attr {
-                        text(status.label)
-                        fontSize(BusHomeTokens.fontSizeCaption)
-                        lineHeight(BusHomeSectionTokens.captionLineHeight)
-                        if (status.emphasized) fontWeightBold() else fontWeightMedium()
-                        color(status.text)
-                        marginRight(BusHomeSectionTokens.metaGap)
-                    }
-                }
-                if (!dense) {
-                    Text {
-                        attr {
-                            text(task.agent)
-                            fontSize(BusHomeTokens.fontSizeMeta)
-                            fontWeightMedium()
-                            color(BusHomeTokens.textSecondary)
-                            lines(1)
-                            textOverFlowTail()
-                            marginRight(BusHomeSectionTokens.metaGap)
-                        }
-                    }
-                }
-                val summary = busTaskRowSummaryText(task)
-                if (summary.isNotBlank()) {
-                    Text {
-                        attr {
-                            text("· $summary")
-                            fontSize(BusHomeTokens.fontSizeMeta)
-                            lineHeight(BusHomeSectionTokens.captionLineHeight)
-                            color(BusHomeTokens.textTertiary)
-                            flex(1f)
-                            lines(1)
-                            textOverFlowTail()
-                        }
+                        size(BusHomeSectionTokens.unreadDotSize, BusHomeSectionTokens.unreadDotSize)
+                        borderRadius(BusHomeSectionTokens.unreadDotSize / 2f)
+                        backgroundColor(palette.unreadDot)
+                        accessibility("未读")
                     }
                 }
             }

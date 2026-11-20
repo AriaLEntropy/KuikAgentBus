@@ -164,6 +164,12 @@ internal class DshBusHomePage : BasePager() {
     private var connectionMode = ""
     private var databaseDir = ""
     private var store: DshLocalStore? = null
+    /** 未读点：本机记住每台电脑下每个任务上次打开时的 updatedAt。 */
+    private val unreadSeen = mutableMapOf<String, String>()
+    private var unreadHostId = ""
+    private var unreadRevision by observable(0)
+    /** 通知点击带进来的 taskId：等快照到了再打开，避免首页还没数据就跳空。 */
+    private var pendingOpenTaskId = ""
     /** Bus 快照缓存：冷启动先读，收到网络快照后再覆盖。 */
     private var busCache: BusCache? = null
     private var localBusCache: DshLocalBusSnapshotCache? = null
@@ -720,6 +726,7 @@ internal class DshBusHomePage : BasePager() {
 
     /** 任务行 / 新任务共用的对话页；草稿态 taskId 为空。 */
     private fun openBusChat(task: BusHomeTask) {
+        markTaskRead(task)
         val device = homeView.device ?: return
         val agent = homeView.agents.firstOrNull { it.key == task.agentKey }
         acquireModule<RouterModule>(RouterModule.MODULE_NAME).openPage(
@@ -744,6 +751,89 @@ internal class DshBusHomePage : BasePager() {
                 put("canAutoApprove", agent?.canAutoApprove == true)
             },
         )
+    }
+
+    private fun unreadSeenKey(host: String): String = "bus_unread_seen:$host"
+
+    private fun unreadBaselineKey(host: String): String = "bus_unread_baselined:$host"
+
+    private fun prefs(): SharedPreferencesModule? =
+        runCatching { acquireModule<SharedPreferencesModule>(SharedPreferencesModule.MODULE_NAME) }.getOrNull()
+
+    private fun loadUnreadSeen(host: String): MutableMap<String, String> {
+        val raw = runCatching { prefs()?.getItem(unreadSeenKey(host)) }.getOrNull().orEmpty()
+        if (raw.isBlank()) return mutableMapOf()
+        val obj = runCatching { JSONObject(raw) }.getOrNull() ?: return mutableMapOf()
+        val result = mutableMapOf<String, String>()
+        val keys = obj.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            result[key] = obj.optString(key)
+        }
+        return result
+    }
+
+    private fun saveUnreadSeen() {
+        val host = unreadHostId
+        if (host.isBlank()) return
+        val obj = JSONObject()
+        unreadSeen.forEach { (key, value) -> obj.put(key, value) }
+        runCatching { prefs()?.setItem(unreadSeenKey(host), obj.toString()) }
+    }
+
+    /**
+     * 首次同步的存量任务视为已读；此后没有记录的任务按新任务处理。
+     * 每台电脑单独一份，切换电脑不会串。
+     */
+    private fun ensureUnreadBaseline(view: BusHomeView) {
+        val host = hostId.ifBlank { view.device?.agentId.orEmpty() }
+        if (host.isBlank()) return
+        var changed = false
+        if (unreadHostId != host) {
+            unreadHostId = host
+            unreadSeen.clear()
+            unreadSeen.putAll(loadUnreadSeen(host))
+            changed = true
+        }
+        val baselined = runCatching { prefs()?.getItem(unreadBaselineKey(host)) }.getOrNull() == "1"
+        // 空列表先不写基线：冷启动的空缓存不能把随后到达的真实任务全标成“已读”
+        if (!baselined && view.tasks.isNotEmpty()) {
+            view.tasks.forEach { task ->
+                if (task.updatedAt.isNotBlank()) unreadSeen[task.id] = task.updatedAt
+            }
+            saveUnreadSeen()
+            runCatching { prefs()?.setItem(unreadBaselineKey(host), "1") }
+            changed = true
+        }
+        if (changed) unreadRevision++
+    }
+
+    private fun refreshUnreadMarkers() {
+        val host = hostId.ifBlank { unreadHostId }
+        if (host.isBlank()) return
+        unreadHostId = host
+        unreadSeen.clear()
+        unreadSeen.putAll(loadUnreadSeen(host))
+        unreadRevision++
+    }
+
+    private fun isTaskUnread(task: BusHomeTask): Boolean {
+        // 读一次 revision，让打开任务后行尾点能即时消失
+        unreadRevision
+        return busTaskIsUnread(task, unreadSeen[task.id])
+    }
+
+    private fun markTaskRead(task: BusHomeTask) {
+        val host = hostId.ifBlank { unreadHostId }
+        if (host.isBlank()) return
+        if (unreadHostId != host) {
+            unreadHostId = host
+            unreadSeen.clear()
+            unreadSeen.putAll(loadUnreadSeen(host))
+        }
+        unreadSeen[task.id] = task.updatedAt
+        saveUnreadSeen()
+        unreadRevision++
     }
 
     /** 审批卡点整卡 / 「自定义回复…」都进会话页，输入框在那里 */
@@ -1071,6 +1161,13 @@ internal class DshBusHomePage : BasePager() {
             runCatching { store?.clearBusCache(BusCacheScope.bus(hostId)) }
             runCatching { store?.clearScope(BusCacheScope.relay(hostId)) }
         }
+        runCatching { prefs()?.setItem(unreadSeenKey(hostId), "") }
+        runCatching { prefs()?.setItem(unreadBaselineKey(hostId), "") }
+        if (unreadHostId == hostId) {
+            unreadHostId = ""
+            unreadSeen.clear()
+            unreadRevision++
+        }
         if (this.hostId == hostId) {
             this.hostId = ""
             lastCachedSnapshot = ""
@@ -1158,6 +1255,12 @@ internal class DshBusHomePage : BasePager() {
         else -> "$fallback（${result.status}）"
     }
 
+    override fun pageDidAppear() {
+        super.pageDidAppear()
+        // 从会话页返回时重新读一次标记，保证行尾点和服务端最新的 updatedAt 对齐
+        refreshUnreadMarkers()
+    }
+
     override fun created() {
         super.created()
         // 首页所有尺寸都按画布 375 等比换算；created 先设一次，避免首屏用到默认值 1
@@ -1183,6 +1286,7 @@ internal class DshBusHomePage : BasePager() {
         })
         connectionMode = pageData.params.optString("connectionMode")
         databaseDir = pageData.params.optString("databaseDir")
+        pendingOpenTaskId = pageData.params.optString("openTaskId")
         store = if (databaseDir.isEmpty()) {
             null
         } else {
@@ -1321,7 +1425,18 @@ internal class DshBusHomePage : BasePager() {
         }
         pruneApprovalState()
         initProjectCollapseIfNeeded()
+        ensureUnreadBaseline(next)
         syncTaskRows()
+        openPendingTaskIfNeeded()
+    }
+
+    /** 通知点击落到首页后，用快照里的任务打开会话；openBusChat 会写已读标记。 */
+    private fun openPendingTaskIfNeeded() {
+        val taskId = pendingOpenTaskId
+        if (taskId.isBlank()) return
+        val task = homeView.tasks.firstOrNull { it.id == taskId } ?: return
+        pendingOpenTaskId = ""
+        openBusChat(task)
     }
 
     /** 当前电脑的稳定 id：优先用配对档案，其次路由参数；都不行才退回快照 agentId。 */
@@ -1520,6 +1635,7 @@ internal class DshBusHomePage : BasePager() {
                                     this@DshBusHomePage.listScrolled = it > 1f
                                 },
                                 onOpenTask = { this@DshBusHomePage.openBusChat(it) },
+                                unread = { this@DshBusHomePage.isTaskUnread(it) },
                                 onToggleGroup = { key, expanded ->
                                     this@DshBusHomePage.setProjectExpanded(key, expanded)
                                 },

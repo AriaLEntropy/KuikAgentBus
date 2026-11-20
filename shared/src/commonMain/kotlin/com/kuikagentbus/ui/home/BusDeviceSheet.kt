@@ -74,6 +74,7 @@ internal fun busSheetPalette(colors: DshColorTokens): BusHomePalette = if (!colo
         onSelected = colors.labelPrimaryInverted,
         error = colors.stateErrorPrimary,
         errorFill = colors.stateErrorSecondary,
+        unreadDot = BusHomeTokens.unreadDotDark,
         topFadeStart = BusHomeTokens.topFadeStartDark,
         topFadeMiddle = BusHomeTokens.topFadeMiddleDark,
         topFadeBody = BusHomeTokens.topFadeBodyDark,

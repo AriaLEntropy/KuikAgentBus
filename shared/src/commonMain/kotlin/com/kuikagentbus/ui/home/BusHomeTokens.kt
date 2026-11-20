@@ -101,6 +101,10 @@ internal object BusHomeTokens {
     /** 选中态底色 #1D1B20 */
     val selectedFill: Color = Color(0xFF1D1B20)
 
+    /** 未读点：和首页头部淡紫同族，浅色用深一档保证白底可见 */
+    val unreadDot: Color = Color(0xFF7A68B5)
+    val unreadDotDark: Color = Color(0xFFC4B5FD)
+
     /** 选中态前景 #FFFFFF */
     val selectedForeground: Color = Color(0xFFFFFFFF)
 
@@ -322,9 +326,6 @@ internal object BusHomeTokens {
     /** Agent 头像描边 1.5 */
     val avatarBorder: Float get() = busHomePx(1.5f)
 
-    /** 头像投影 rgba(17,17,26,.18) */
-    val avatarShadow: Color = Color(0x2E11111A)
-
     /** 页面宽度基准 375（设计稿宽度，等比换算用） */
     const val designPageWidth: Float = 375f
 
@@ -352,6 +353,8 @@ internal data class BusHomePalette(
     val onSelected: Color,
     val error: Color,
     val errorFill: Color,
+    /** 列表行尾的未读点 */
+    val unreadDot: Color,
     /** 列表顶部渐隐四条色标；浅色取设计稿原值，深色按当前页面底色同幅压暗 */
     val topFadeStart: Color,
     val topFadeMiddle: Color,
@@ -373,6 +376,7 @@ private val busHomeLightPalette = BusHomePalette(
     onSelected = BusHomeTokens.selectedForeground,
     error = BusHomeTokens.error,
     errorFill = BusHomeTokens.errorFill,
+    unreadDot = BusHomeTokens.unreadDot,
     topFadeStart = BusHomeTokens.topFadeStart,
     topFadeMiddle = BusHomeTokens.topFadeMiddle,
     topFadeBody = BusHomeTokens.topFadeBody,

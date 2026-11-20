@@ -22,6 +22,7 @@ class BusHomeSectionsTest {
         pending: Boolean,
         summary: String = "",
         lastMessage: String = "",
+        updatedAt: String = "",
     ) = BusHomeTask(
         id = id,
         title = "任务 $id",
@@ -35,6 +36,7 @@ class BusHomeSectionsTest {
         pending = pending,
         summary = summary,
         lastMessage = lastMessage,
+        updatedAt = updatedAt,
     )
 
     private fun agent(key: String, source: String, connectorId: String? = null) = BusHomeAgent(
@@ -188,6 +190,27 @@ class BusHomeSectionsTest {
     }
 
     @Test
+    fun completedHidesStatusButOthersKeepIt() {
+        assertFalse(busTaskShowsStatus("completed"))
+        assertTrue(busTaskShowsStatus("running"))
+        assertTrue(busTaskShowsStatus("waitingApproval"))
+        assertTrue(busTaskShowsStatus("idle"))
+    }
+
+    @Test
+    fun unreadComparesSeenUpdatedAt() {
+        val completed = task("t1", "completed", false, updatedAt = "2026-11-20T10:00:00")
+        // 基线之后新出现的任务没有记录：未读
+        assertTrue(busTaskIsUnread(completed, null))
+        // 打开过且 updatedAt 没变：已读
+        assertFalse(busTaskIsUnread(completed, "2026-11-20T10:00:00"))
+        // 打开后又有新活动：重新未读
+        assertTrue(busTaskIsUnread(completed, "2026-11-20T09:00:00"))
+        // updatedAt 为空不标未读
+        assertFalse(busTaskIsUnread(completed.copy(updatedAt = ""), null))
+    }
+
+    @Test
     fun rowSummaryFallsBackToLastMessage() {
         assertEquals("请求执行：ls", busTaskRowSummaryText(task("x", "waitingApproval", true, summary = "请求执行：ls", lastMessage = "旧消息")))
         assertEquals("旧消息", busTaskRowSummaryText(task("x", "completed", false, summary = "", lastMessage = "旧消息")))
@@ -215,20 +238,29 @@ class BusHomeSectionsTest {
     fun avatarStackAlwaysEndsWithEllipsisSlot() {
         val agents = listOf(agent("codex", "codex"), agent("acp:claude-code", "acp", "claude-code"))
         val slots = busHomeAvatarSlots(agents, selectedKeys = emptySet())
-        assertEquals(BUS_AVATAR_AGENT_SLOTS + 1, slots.size)
+        // 只有真实存在的 Agent + 省略号，不足 3 个不补空位
+        assertEquals(3, slots.size)
         assertTrue(slots.last().ellipsis)
-        // 没勾选 = 全部：前几格铺电脑上的 Agent，剩下的给空位
-        assertEquals(listOf(true, true, false), slots.take(3).map { it.filled })
         assertEquals(BusAgentVisuals.CODEX, slots[0].asset)
         assertTrue(slots[0].isPhoto)
-        assertFalse(slots[2].filled)
+        assertTrue(slots.dropLast(1).all { it.asset.isNotEmpty() })
     }
 
     @Test
     fun avatarStackShowsSelectedAgentsFirst() {
         val agents = listOf(agent("codex", "codex"), agent("dsh", "dsh"), agent("pi", "pi"))
         val slots = busHomeAvatarSlots(agents, selectedKeys = setOf("pi"))
-        assertEquals(listOf(BusAgentVisuals.PI, "", ""), slots.take(3).map { it.asset })
+        assertEquals(2, slots.size)
+        assertEquals(BusAgentVisuals.PI, slots[0].asset)
+        assertTrue(slots[1].ellipsis)
+    }
+
+    @Test
+    fun avatarStackCapsAtThreeAgents() {
+        val agents = listOf(agent("a", "codex"), agent("b", "dsh"), agent("c", "pi"), agent("d", "codex"))
+        val slots = busHomeAvatarSlots(agents, selectedKeys = emptySet())
+        assertEquals(BUS_AVATAR_AGENT_SLOTS + 1, slots.size)
+        assertTrue(slots.last().ellipsis)
     }
 
     // ---------- 审批计数 ----------

@@ -77,6 +77,7 @@ internal fun ViewContainer<*, *>.BusAgentSheet(
         if (busHomeAgentsEmpty(agents)) {
             BusAgentSheetEmptyState(palette = palette)
         } else {
+            val selectableKeys = busAgentSelectableKeys(agents)
             agents.forEach { agent ->
                 BusAgentRow(
                     agent = agent,
@@ -84,6 +85,7 @@ internal fun ViewContainer<*, *>.BusAgentSheet(
                     palette = palette,
                     canRestartConnectors = canRestartConnectors,
                     selected = { busAgentRowSelected(selectedKeys(), agent) },
+                    locked = { busAgentToggleLocked(selectedKeys(), agent.key, selectableKeys) },
                     expanded = { busAgentRowIsExpanded(expandedKey(), agent.key) },
                     busy = { busyKey() == agent.key },
                     onToggle = {
@@ -321,6 +323,7 @@ private fun ViewContainer<*, *>.BusAgentRow(
     palette: BusHomePalette,
     canRestartConnectors: Boolean,
     selected: () -> Boolean,
+    locked: () -> Boolean,
     expanded: () -> Boolean,
     busy: () -> Boolean,
     onToggle: () -> Unit,
@@ -478,6 +481,8 @@ private fun ViewContainer<*, *>.BusAgentRow(
                         marginLeft(BusSheetTokens.rowGapInner)
                         alignItemsCenter()
                         justifyContentCenter()
+                        // 最后一项已选中时置灰：至少保留一个 Agent，点了也不会变
+                        opacity(if (locked()) 0.4f else 1f)
                         backgroundColor(if (selected()) palette.selectedFill else busSheetRowFill(palette))
                         // 选中时描边与底同色，等价于"无边"，但保持单条属性调用便于响应式更新
                         border(
@@ -488,7 +493,7 @@ private fun ViewContainer<*, *>.BusAgentRow(
                             ),
                         )
                     }
-                    event { click { if (!busy()) onToggle() } }
+                    event { click { if (!busy() && !locked()) onToggle() } }
                     Image {
                         attr {
                             src(ImageUri.commonAssets("check.svg"))
